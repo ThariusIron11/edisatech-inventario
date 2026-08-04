@@ -1861,6 +1861,26 @@
     return (e?.empresa||'').toUpperCase()==='INTERNO';
   }
 
+  // Campo "Precio cotizado": aparece una vez que el envío tiene número de remesa (no aplica a
+  // envíos INTERNO). Este valor se guarda directamente como el "costo de envío" del envío,
+  // el mismo campo que se ve/edita en la pestaña Cotización de la Ficha de Envío. Una vez
+  // guardado, se muestra aquí mismo con el símbolo $ + el precio.
+  function construirBloquePrecioCotizado(e,ei){
+    if(esEnvioInterno(e)||!e.remesa) return '';
+    const facturadoFijo=e.costoFacturado!=null&&e.costoFacturado!=='';
+    if(facturadoFijo){
+      return `<p style="font-size:13px;color:#2e7d32;font-weight:700;margin:6px 0 0;">💲 Precio cotizado: ${formatPesosCO(e.costoEnvio)}</p>`;
+    }
+    return `
+      <p class="field-label" style="margin:8px 0 2px;">Precio cotizado</p>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span style="font-weight:700;color:#555;font-size:14px;">$</span>
+        <input type="number" id="precioCotizadoInput_${ei}" min="0" step="0.01" value="${e.costoEnvio??''}" placeholder="Ej: 150000" style="margin:0;flex:1;" />
+        <button type="button" class="btn-sm" style="background:#e8f5e9;color:#2e7d32;white-space:nowrap;" onclick="guardarPrecioCotizadoEnvio(${ei})">Guardar</button>
+      </div>
+      ${e.costoEnvio!=null&&e.costoEnvio!==''?`<p style="font-size:12px;color:#2e7d32;font-weight:700;margin:4px 0 0;">${formatPesosCO(e.costoEnvio)}</p>`:''}`;
+  }
+
   function construirHtmlEnvioFoco(focoKey){
     const ei=encontrarEnvioPorFoco(pedidoActual, focoKey);
     const e=ei>=0?(pedidoActual.envios||[])[ei]:null;
@@ -1887,6 +1907,7 @@
             <input type="text" id="remesaInput_${ei}" placeholder="Número de remesa" style="margin:0;flex:1;" />
             <button type="button" class="btn-sm" style="background:#e8f5e9;color:#2e7d32;white-space:nowrap;" onclick="guardarRemesaEnvio(${ei})">Guardar remesa</button>
           </div>`:'')}
+        ${construirBloquePrecioCotizado(e,ei)}
         <p class="sub-label" style="margin:8px 0 4px;">Remisiones</p>
         ${(e.remisiones||[]).length>1?`<div style="display:flex;gap:8px;margin-bottom:4px;">
           <button type="button" class="btn-sm" style="background:#e3f2fd;color:#1565c0;" onclick='expandirTodasRemisiones(${JSON.stringify((e.remisiones||[]).map((r,ri)=>`${pedidoActual.id}_${ei}_${ri}`))})'>⬇️ Expandir todas</button>
@@ -1939,6 +1960,7 @@
               <input type="text" id="remesaInput_${ei}" placeholder="Número de remesa" style="margin:0;flex:1;" />
               <button type="button" class="btn-sm" style="background:#e8f5e9;color:#2e7d32;white-space:nowrap;" onclick="guardarRemesaEnvio(${ei})">Guardar remesa</button>
             </div>`:'')}
+          ${construirBloquePrecioCotizado(e,ei)}
           ${(e.remisiones||[]).length>1?`<div style="display:flex;gap:8px;margin-top:8px;">
             <button type="button" class="btn-sm" style="background:#e3f2fd;color:#1565c0;" onclick='expandirTodasRemisiones(${JSON.stringify((e.remisiones||[]).map((r,ri)=>`${pedidoActual.id}_${ei}_${ri}`))})'>⬇️ Expandir todas</button>
             <button type="button" class="btn-sm" style="background:#eee;color:#666;" onclick='contraerTodasRemisiones(${JSON.stringify((e.remisiones||[]).map((r,ri)=>`${pedidoActual.id}_${ei}_${ri}`))})'>⬆️ Contraer todas</button>
@@ -2264,6 +2286,39 @@
     }
 
     toast(sincronizados>0?'✓ Remesa guardada y sincronizada con el pedido vinculado':'✓ Remesa guardada');
+    renderModalPedido();
+  }
+
+  // Guarda el "Precio cotizado" del envío directamente en su campo costoEnvio — el mismo que
+  // se ve/edita en la pestaña Cotización de la Ficha de Envío. Igual que la remesa, si el
+  // envío es una remesa compartida (vinculoId) se sincroniza con el otro pedido vinculado.
+  window.guardarPrecioCotizadoEnvio=async function(ei){
+    const input=document.getElementById(`precioCotizadoInput_${ei}`);
+    const valor=parseFloat(input?.value);
+    if(isNaN(valor)||valor<0){toast('Escribe un precio cotizado válido',true);return;}
+    const enviosNuevos=[...(pedidoActual.envios||[])];
+    if(!enviosNuevos[ei]){toast('Envío no encontrado',true);return;}
+    const vinculoId=enviosNuevos[ei].vinculoId||null;
+    enviosNuevos[ei]={...enviosNuevos[ei], costoEnvio:valor};
+    await updateDoc(doc(db,'inv_pedidos',pedidoActual.id),{envios:enviosNuevos});
+    pedidoActual.envios=enviosNuevos;
+
+    // Si esta remesa es compartida con otro(s) pedido(s) (misma vinculoId), se actualiza
+    // también allá para que ambos queden siempre con el mismo precio cotizado.
+    let sincronizados=0;
+    if(vinculoId){
+      for(const p of pedidos){
+        if(p.id===pedidoActual.id) continue;
+        const idx=(p.envios||[]).findIndex(e=>e.vinculoId===vinculoId);
+        if(idx<0) continue;
+        const otroEnviosNuevos=[...(p.envios||[])];
+        otroEnviosNuevos[idx]={...otroEnviosNuevos[idx], costoEnvio:valor};
+        await updateDoc(doc(db,'inv_pedidos',p.id),{envios:otroEnviosNuevos});
+        sincronizados++;
+      }
+    }
+
+    toast(sincronizados>0?'✓ Precio cotizado guardado y sincronizado con el pedido vinculado':'✓ Precio cotizado guardado');
     renderModalPedido();
   }
 
