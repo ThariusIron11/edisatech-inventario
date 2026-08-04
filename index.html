@@ -107,6 +107,14 @@
       .app-frame{border-radius:20px;}
       .app-title{text-align:left;}
       .app-sub{text-align:left;}
+
+      /* Login: en escritorio se ve chico si se queda con el ancho de celular */
+      #loginOverlay .app-frame{max-width:480px;padding:40px 44px;}
+      #loginOverlay .app-title{font-size:24px;text-align:center;}
+      #loginOverlay .app-sub{font-size:14px;text-align:center;margin-bottom:26px;}
+      #loginOverlay .field-label{font-size:14px;}
+      #loginOverlay input[type="text"],#loginOverlay input[type="password"]{padding:13px 15px;font-size:16px;}
+      #loginOverlay #loginBtn{padding:13px;font-size:16px;margin-top:18px;}
     }
 
     @media(min-width:1300px){
@@ -116,6 +124,7 @@
       #panel-radar.active{grid-template-columns:1fr 1fr 1fr;}
     }
     .app-frame{background:#fff;border-radius:24px;padding:22px 16px;width:100%;box-shadow:0 4px 24px rgba(0,0,0,0.10);}
+    .login-frame{max-width:340px;}
     .app-title{font-size:19px;font-weight:700;color:#1a1a1a;text-align:center;margin-bottom:3px;}
     .app-sub{font-size:12px;color:#999;text-align:center;margin-bottom:18px;}
     /* ── INPUTS ── */
@@ -320,7 +329,7 @@
 
 <!-- ── LOGIN (bloquea toda la app hasta autenticarse) ── -->
 <div id="loginOverlay" style="position:fixed;inset:0;background:#e8ede8;z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;">
-  <div class="app-frame" style="max-width:340px;">
+  <div class="app-frame login-frame">
     <div class="app-title">📦 Inventario Bodega</div>
     <div class="app-sub">Inicia sesión para continuar</div>
     <form id="loginForm">
@@ -991,8 +1000,8 @@
   }
   await esperarLogin();
 
-  // ── CIERRE DE SESIÓN AUTOMÁTICO POR INACTIVIDAD (10 minutos) ──
-  const INACTIVIDAD_LIMITE_MS=10*60*1000;
+  // ── CIERRE DE SESIÓN AUTOMÁTICO POR INACTIVIDAD (30 minutos) ──
+  const INACTIVIDAD_LIMITE_MS=30*60*1000;
   let inactividadTimer=null;
   function reiniciarTimerInactividad(){
     if(inactividadTimer) clearTimeout(inactividadTimer);
