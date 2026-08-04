@@ -6479,6 +6479,7 @@
   // un vistazo si sigue en proceso o ya está completo sin tener que entrar a la ficha.
   function badgePedidoTabEstado(p){
     if(!p) return '';
+    if(pedidoTieneDevolucion(p)) return `<span class="pedido-tab-badge" style="background:#e3f2fd;color:#1565c0;border-radius:6px;padding:1px 5px;font-size:11px;margin-right:5px;">↩️</span>`;
     if(p.estado==='completo') return `<span class="pedido-tab-badge" style="background:#e8f5e9;color:#2e7d32;border-radius:6px;padding:1px 5px;font-size:11px;margin-right:5px;">✅</span>`;
     return `<span class="pedido-tab-badge" style="background:#fff8e1;color:#f57f17;border-radius:6px;padding:1px 5px;font-size:11px;margin-right:5px;">🟡</span>`;
   }
@@ -8174,7 +8175,12 @@
     }
 
     await updateDoc(doc(db,'inv_pedidos',pedidoId),{items:updItems});
+    // Se actualiza también el objeto local (el mismo que vive en pedidosActivosMap/
+    // pedidosRecientesMap y alimenta la lista de Pedidos) para que la pestaña "↩️ Devolución"
+    // lo refleje de inmediato, sin depender del round-trip del listener de Firestore.
+    p.items=updItems;
     if(pedidoActual&&pedidoActual.id===pedidoId){ pedidoActual.items=updItems; renderModalPedido(); }
+    renderPedidos();
 
     // Devolución sobre un pedido tipo reparación: significa que hubo un error en el arreglo,
     // así que la reparación vinculada vuelve a "en proceso" para corregirla (deja de estar
