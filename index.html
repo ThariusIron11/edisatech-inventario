@@ -8123,7 +8123,17 @@
     }
     if(!confirm('¿Confirmar esta devolución? El stock vuelto a inventario y los movimientos generados no se pueden deshacer desde aquí.')) return;
 
-    const updItems=p.items.map(it=>({...it,unidades:it.unidades?it.unidades.map(u=>({...u})):it.unidades}));
+    // OJO: Firestore rechaza cualquier updateDoc que contenga un campo con valor `undefined`
+    // en cualquier parte del objeto (falla en silencio, sin lanzar nada visible en la UI).
+    // Antes, a los ítems SIN lista de series (la mayoría — devoluciones "a granel" por
+    // cantidad) se les agregaba igual la llave `unidades: undefined`, lo que tumbaba este
+    // guardado: el stock ya se había devuelto (paso previo) pero el pedido nunca quedaba
+    // marcado como devuelto, así que no se movía a la pestaña "↩️ Devolución".
+    const updItems=p.items.map(it=>{
+      const copia={...it};
+      if(it.unidades) copia.unidades=it.unidades.map(u=>({...u}));
+      return copia;
+    });
 
     // Unidades individuales (motor/reductor/motoreductor)
     for(const {itemIndex,unidadIndex} of unidadesSeleccionadas){
@@ -8174,7 +8184,16 @@
       });
     }
 
-    await updateDoc(doc(db,'inv_pedidos',pedidoId),{items:updItems});
+    try{
+      await updateDoc(doc(db,'inv_pedidos',pedidoId),{items:updItems});
+    }catch(err){
+      // Si esto falla, el stock de las piezas YA se devolvió arriba (esos updateDoc ya
+      // corrieron y no se pueden deshacer desde aquí) pero el pedido no queda marcado como
+      // devuelto. Se avisa explícitamente en vez de morir en silencio como antes.
+      console.error('Error guardando la devolución en el pedido:',err);
+      toast('⚠️ El stock ya se devolvió, pero no se pudo guardar la devolución en el pedido. Avisa a soporte.',true);
+      return;
+    }
     // Se actualiza también el objeto local (el mismo que vive en pedidosActivosMap/
     // pedidosRecientesMap y alimenta la lista de Pedidos) para que la pestaña "↩️ Devolución"
     // lo refleje de inmediato, sin depender del round-trip del listener de Firestore.
