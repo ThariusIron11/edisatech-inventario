@@ -893,6 +893,19 @@
   </div>
 </div>
 
+<!-- Modal: elegir de qué ubicación tomar cada pieza de un acople compuesto -->
+<div class="modal-overlay hidden" id="modalUbicacionAcople">
+  <div class="modal-box">
+    <p class="modal-titulo">🔗 ¿De dónde tomar las piezas?</p>
+    <p class="modal-sub" id="ubicAcopleSub">Esta pieza existe en más de una ubicación. Elige de cuál tomarla para este pedido.</p>
+    <div id="ubicAcopleContenido"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn-secondary" style="flex:1;" onclick="cancelarUbicacionAcople()">Cancelar</button>
+      <button class="btn-primary" style="flex:1;" onclick="confirmarUbicacionAcople()">Confirmar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
@@ -2534,6 +2547,68 @@
       return Math.floor(dispPieza/(p.cantidad||1));
     });
     return Math.min(...sets);
+  }
+
+  // ── ELEGIR UBICACIÓN DE PIEZAS AL ASIGNAR UN ACOPLE COMPUESTO ──
+  // Un acople compuesto no está atado a una localización: sus piezas (ej: rejilla 1060) pueden
+  // existir como filas de stock separadas en distintas ubicaciones (ej: B1 y C1). El acople puede
+  // tomar de cualquiera, PERO eso no se decide solo/automático: cuando toca reservar/asignar
+  // stock para un pedido, se le pregunta al usuario de cuál ubicación sacar cada pieza que tenga
+  // más de una opción. Si una pieza solo existe en una ubicación, se usa esa sin preguntar.
+  let ubicAcopleResolver=null;
+  let ubicAcopleOpciones=[]; // [{idx, requiereEleccion, opciones:[{id,localizacion,disponible}], elegido}]
+
+  // Resuelve, para cada parte de la receta (partesDef), la lista de filas de catálogo
+  // compatibles (misma pieza, cualquier ubicación). Devuelve una promesa que resuelve con un
+  // array paralelo a partesDef de equipoId elegidos, o null si el usuario cancela.
+  function elegirUbicacionesAcople(partesDef){
+    const opciones=partesDef.map((pz,idx)=>{
+      const compatibles=piezasCompatiblesAcople(pz,undefined)
+        .map(e=>({id:e.id,localizacion:e.localizacion||'Sin ubicación',disponible:e.disponible||0}))
+        .sort((a,b)=>b.disponible-a.disponible);
+      return {idx,nombre:pz.nombre,requiereEleccion:compatibles.length>1,opciones:compatibles,elegido:compatibles[0]?.id||pz.equipoId};
+    });
+
+    const necesitaModal=opciones.some(o=>o.requiereEleccion);
+    if(!necesitaModal){
+      return Promise.resolve(opciones.map(o=>o.elegido));
+    }
+
+    ubicAcopleOpciones=opciones;
+    const cont=document.getElementById('ubicAcopleContenido');
+    if(cont){
+      cont.innerHTML=opciones.map(o=>{
+        if(!o.requiereEleccion){
+          return `<div class="config-item"><span class="config-item-label">${o.nombre}</span><span style="font-size:12px;color:#888;">${o.opciones[0]?.localizacion||'Sin stock registrado'}</span></div>`;
+        }
+        return `<div style="margin-top:10px;">
+          <label style="font-size:13px;font-weight:600;">${o.nombre}</label>
+          <select style="width:100%;margin-top:4px;padding:8px;border-radius:8px;border:1px solid #ddd;" onchange="onCambioUbicacionAcople(${o.idx},this.value)">
+            ${o.opciones.map(op=>`<option value="${op.id}" ${op.id===o.elegido?'selected':''}>${op.localizacion} · ${op.disponible} disp</option>`).join('')}
+          </select>
+        </div>`;
+      }).join('');
+    }
+    document.getElementById('modalUbicacionAcople')?.classList.remove('hidden');
+    return new Promise(resolve=>{ ubicAcopleResolver=resolve; });
+  }
+
+  window.onCambioUbicacionAcople=function(idx,equipoId){
+    const o=ubicAcopleOpciones.find(x=>x.idx===idx);
+    if(o) o.elegido=equipoId;
+  }
+
+  window.confirmarUbicacionAcople=function(){
+    document.getElementById('modalUbicacionAcople')?.classList.add('hidden');
+    const resultado=ubicAcopleOpciones.sort((a,b)=>a.idx-b.idx).map(o=>o.elegido);
+    const resolver=ubicAcopleResolver; ubicAcopleResolver=null;
+    if(resolver) resolver(resultado);
+  }
+
+  window.cancelarUbicacionAcople=function(){
+    document.getElementById('modalUbicacionAcople')?.classList.add('hidden');
+    const resolver=ubicAcopleResolver; ubicAcopleResolver=null;
+    if(resolver) resolver(null);
   }
 
   // ── FIRESTORE LISTENERS ──
@@ -6844,7 +6919,7 @@
                 ?(item.partes||[]).map(p=>{
                     const necesario=(p.cantidad||0)*(item.cantidad||1);
                     const cubP=p.cubierto||0;
-                    return `<span style="font-size:13px;">${p.nombre} X ${necesario} und${cubP<necesario?` <span style="color:#e65100;">(reservado ${cubP})</span>`:''}</span><br/>`;
+                    return `<span style="font-size:13px;">${p.nombre} X ${necesario} und${p.localizacion?` <span style="color:#999;">· ${p.localizacion}</span>`:''}${cubP<necesario?` <span style="color:#e65100;">(reservado ${cubP})</span>`:''}</span><br/>`;
                   }).join('')
                 :`<span style="font-size:12px;color:#aaa;">${badgeHTML(item.equipoTipo)}</span>`}${pendStock>0?`<br/><span style="font-size:12px;color:#e65100;">⏳ Pendiente de asignar: ${pendStock}</span>`:''}${ocHtmlLone}</td>
             <td><span class="badge-loc">${item.localizacion||'-'}</span></td>
@@ -7459,8 +7534,16 @@
     // (en la cantidad que le corresponde a cada una), igual que un motoreductor reserva
     // motor+reductor. Si a alguna pieza le falta stock, ese equipo queda "pendiente de asignar".
     if(eq.tipo==='acople'&&eq.compuesto){
-      const partesDef=eq.partes||[];
-      if(partesDef.length===0){toast('Este acople compuesto no tiene piezas configuradas. Corrígelo en Catálogo.',true);return;}
+      const partesDefBase=eq.partes||[];
+      if(partesDefBase.length===0){toast('Este acople compuesto no tiene piezas configuradas. Corrígelo en Catálogo.',true);return;}
+
+      // La receta del acople compuesto no fija una ubicación: cada pieza puede existir en
+      // más de una (ej: rejilla 1060 en B1 y en C1). Si alguna pieza tiene más de una ubicación
+      // con stock registrado, se le pregunta al usuario de cuál tomarla para este pedido —
+      // nunca se elige automáticamente.
+      const equipoIdsElegidos=await elegirUbicacionesAcople(partesDefBase);
+      if(equipoIdsElegidos===null) return; // el usuario canceló la elección de ubicación
+      const partesDef=partesDefBase.map((pz,idx)=>({...pz,equipoId:equipoIdsElegidos[idx]||pz.equipoId}));
 
       // Aviso preventivo: si al reservar esto quedan menos acoples completos armables que el
       // mínimo configurado para este acople, se avisa y se deja decidir si continuar o no.
@@ -7496,7 +7579,7 @@
             });
           }
         }
-        partesItem.push({equipoId:pz.equipoId,nombre:pz.nombre,cantidad:pz.cantidad,cubierto:cubrirPieza});
+        partesItem.push({equipoId:pz.equipoId,nombre:pz.nombre,cantidad:pz.cantidad,cubierto:cubrirPieza,localizacion:equipos.find(e=>e.id===pz.equipoId)?.localizacion||''});
       }
       const setsCubiertos=Math.min(qty,...partesItem.map(p=>Math.floor((p.cubierto||0)/(p.cantidad||1))));
       if(pedidoActual.id&&setsCubiertos<qty){
