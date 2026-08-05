@@ -407,7 +407,7 @@
   <div class="app-frame">
     <p class="app-title">📋 Pedidos</p>
     <p class="app-sub">Reservas y despachos</p>
-    <button class="btn-primary" onclick="abrirNuevoPedido()">+ Nuevo pedido</button>
+    <button class="btn-primary" onclick="abrirModalPedidosDesdeHeader()">+ Nuevo pedido</button>
     <button class="btn-sm" style="width:100%;padding:10px;margin-top:8px;background:#e3f2fd;color:#1565c0;font-weight:700;" onclick="abrirSimulacionEnvio()">🧮 Simulación de Envío</button>
     <div id="pendientesAsignar"></div>
     <hr class="divider" />
@@ -929,7 +929,7 @@
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp, query, orderBy, increment, getDoc, getDocs, limit, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp, query, orderBy, increment, getDoc, getDocs, limit, where, enableNetwork, disableNetwork } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
   import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   const firebaseConfig = {
@@ -946,6 +946,24 @@
     localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
   });
   const auth = getAuth(app);
+
+  // ── RECONEXIÓN AL VOLVER EN PRIMER PLANO ──
+  // En celulares, cuando la PWA pasa a segundo plano (pantalla bloqueada, cambio de app, etc.)
+  // el sistema suele cortar la conexión en tiempo real de Firestore, y el SDK no siempre la
+  // reconecta solo al volver — los cambios quedan "congelados" hasta recargar (F5). Forzamos
+  // un ciclo de red (apagar/prender) cada vez que la app vuelve a estar visible, para que
+  // Firestore reabra el canal y todos los onSnapshot activos se refresquen con datos frescos.
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState==='visible'){
+      disableNetwork(db).then(()=>enableNetwork(db)).catch(()=>{});
+    }
+  });
+  window.addEventListener('focus', () => {
+    disableNetwork(db).then(()=>enableNetwork(db)).catch(()=>{});
+  });
+  window.addEventListener('online', () => {
+    enableNetwork(db).catch(()=>{});
+  });
 
   // ── LOGIN OBLIGATORIO ──
   // Nada de lo que sigue en este archivo (listeners de Firestore, funciones, etc.) se
@@ -5726,8 +5744,13 @@
             const cub=cubiertoDeItem(item);
             const pendStock=(item.cantidad||0)-cub;
             const devuelto=itemTieneDevolucion(item);
+            // Muestra el tipo de equipo junto al nombre en este resumen, salvo para
+            // Piezas de Acople, Acople, Motor y Reductor (ya se identifican solos ahí).
+            const TIPOS_SIN_ETIQUETA=['piezas_acople','acople','motor','reductor'];
+            const tipoInfo=tipos.find(x=>x.valor===item.equipoTipo);
+            const tipoLbl=(!TIPOS_SIN_ETIQUETA.includes(item.equipoTipo)&&tipoInfo?.nombre)?` <span style="color:#999;">· ${tipoInfo.nombre}</span>`:'';
             return `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:${devuelto?'#1565c0':'#555'};margin-bottom:5px;">
-              <span style="flex:1;${devuelto?'font-weight:700;':''}">${devuelto?'↩️ ':''}${nombreItemPedido(item)}</span>
+              <span style="flex:1;${devuelto?'font-weight:700;':''}">${devuelto?'↩️ ':''}${nombreItemPedido(item)}${tipoLbl}</span>
               <span style="white-space:nowrap;color:#777;">Sol ${item.cantidad} · Cub ${cub} · Des ${item.despachado||0}${pendStock>0?` · <span style="color:#e65100;">⏳ ${pendStock}</span>`:''}${devuelto?` · <span style="color:#1565c0;">↩️ ${cantidadDevueltaDeItem(item)}</span>`:''}</span>
             </div>`;
           }).join('')}
@@ -5756,6 +5779,19 @@
     if(todosExpandidos) pedidosExpandidos.clear();
     else pedidos.forEach(p=>pedidosExpandidos.add(p.id));
     renderPedidos();
+  }
+
+  // Botón "+ Nuevo pedido" del panel principal: si ya hay una sesión de pedidos abierta
+  // (cerrada por fuera del cuadro, con pestañas/borradores pendientes), la retoma tal cual
+  // en vez de descartarla creando una pestaña en blanco. Solo crea una pestaña nueva si no
+  // había ninguna sesión activa.
+  window.abrirModalPedidosDesdeHeader=function(){
+    if(pedidoTabs.length>0){
+      document.getElementById('modalPedido').classList.remove('hidden');
+      activarPedidoTab(pedidoTabActivaKey&&pedidoTabs.some(t=>t.key===pedidoTabActivaKey)?pedidoTabActivaKey:pedidoTabs[0].key);
+      return;
+    }
+    abrirNuevoPedido();
   }
 
   window.abrirNuevoPedido=function(){
@@ -6911,7 +6947,7 @@
               <td class="qty-ok">${item.despachado||0}</td>
               <td>
                 <div class="acciones-btns">
-                  ${completo?btnSeries:esNuevo?(pedidoAccionesVisibles?`<button class="btn-sm" style="background:#eee;color:#666;" onclick="quitarItemPedidoNuevo(${i})">✕ Quitar</button>`:''):`
+                  ${completo?btnSeries:esNuevo?`<button class="btn-sm" style="background:#eee;color:#666;" onclick="quitarItemPedidoNuevo(${i})">✕ Quitar</button>`:`
                     ${pedidoAccionesVisibles?`
                       ${item.deReparacion
                         ?(reemplazoMotor
@@ -6988,7 +7024,7 @@
             <td>
               <div class="acciones-btns">
                 ${completo?btnSeries:esNuevo
-                  ?(pedidoAccionesVisibles?`<button class="btn-sm" style="background:#eee;color:#666;" onclick="quitarItemPedidoNuevo(${i})">✕ Quitar</button>`:'')
+                  ?`<button class="btn-sm" style="background:#eee;color:#666;" onclick="quitarItemPedidoNuevo(${i})">✕ Quitar</button>`
                   :`${pedidoAccionesVisibles?`
                       ${item.deReparacion
                         ?(buscarReemplazoReparacion(i,item.equipoTipo)
@@ -8381,13 +8417,18 @@
   }
 
   window.cerrarModalPedido=function(e){
-    if(!e||e.target===document.getElementById('modalPedido')){
-      document.getElementById('modalPedido').classList.add('hidden');
+    // Clic dentro del cuadro (no en el fondo del overlay): no hace nada.
+    if(e&&e.target!==document.getElementById('modalPedido')) return;
+    document.getElementById('modalPedido').classList.add('hidden');
+    if(!e){
+      // Botón "✕": cierre completo — descarta todas las pestañas/borradores sin guardar.
       pedidoActual=null;
       pedidoTabs=[];
       pedidoTabActivaKey=null;
       limpiarFormularioAgregarPedido();
     }
+    // Clic en el fondo (fuera del cuadro): solo oculta el modal, conserva pedidoActual,
+    // pedidoTabs y el borrador tal como estaban para poder retomarlos después.
   }
 
   // ══════════════════════════════════════════
