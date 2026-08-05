@@ -2234,7 +2234,7 @@
     const remision=document.getElementById('envioRemision')?.value.trim()||'';
     if(!remision){toast('Escribe el número de remisión',true);return;}
 
-    let empresa='', remesa='', encargado=null, vinculoId=null, esVinculo=false, otroPedidoId=null, otroEi=null;
+    let empresa='', remesa='', encargado=null, vinculoId=null, esVinculo=false, otroPedidoId=null, otroEi=null, camposCotizacionVinculo={};
     if(destino==='nuevo'){
       empresa=document.getElementById('envioEmpresa')?.value||'';
       if(!empresa){toast('Selecciona la empresa transportadora',true);return;}
@@ -2252,6 +2252,11 @@
       esVinculo=true;
       empresa=otroEnvio.empresa; remesa=otroEnvio.remesa||''; encargado=otroEnvio.encargado||null;
       vinculoId=otroEnvio.vinculoId||`vinc_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+      // Se copian de una vez los campos de cotización/factura que el otro pedido ya tuviera
+      // guardados, para que se vean aquí sin tener que volver a guardarlos desde el original.
+      ['costoEnvio','costoFacturado','esRecibo','numeroFactura','facturadoCorregido'].forEach(campo=>{
+        if(otroEnvio[campo]!=null) camposCotizacionVinculo[campo]=otroEnvio[campo];
+      });
     }
 
     const items=[...(pedidoActual.items||[])];
@@ -2302,7 +2307,7 @@
     if(destino==='nuevo'){
       enviosNuevos.push({empresa, remesa:remesa||null, encargado:encargado||null, remisiones:[nuevaRemision]});
     } else if(esVinculo){
-      enviosNuevos.push({empresa, remesa:remesa||null, encargado:encargado||null, remisiones:[nuevaRemision], vinculoId, vinculoPedidoId:otroPedidoId});
+      enviosNuevos.push({empresa, remesa:remesa||null, encargado:encargado||null, remisiones:[nuevaRemision], vinculoId, vinculoPedidoId:otroPedidoId, ...camposCotizacionVinculo});
     } else {
       const ei=parseInt(destino);
       if(!enviosNuevos[ei]){toast('Envío no encontrado',true);return;}
