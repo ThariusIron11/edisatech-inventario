@@ -40,6 +40,7 @@
       background:transparent;color:#888;transition:all 0.2s;white-space:nowrap;
     }
     .tab-btn.active{background:#1b2a1b;color:#fff;}
+    .tab-btn-logout{color:#c62828!important;}
     .panel{display:none;width:100%;max-width:500px;}
     .panel.active{display:block;}
 
@@ -84,6 +85,8 @@
       }
       .tab-btn.active{background:rgba(255,255,255,0.15);color:#fff;}
       .tab-btn:hover:not(.active){background:rgba(255,255,255,0.08);color:#fff;}
+      .tab-btn-logout{color:#ff6b6b!important;margin-top:8px;}
+      .tab-btn-logout:hover{background:rgba(198,40,40,0.18);color:#ff8a8a!important;}
 
       /* Content area */
       .desktop-content{
@@ -361,6 +364,7 @@
   <button class="tab-btn" onclick="switchTab('movimientos')">🔄 Movimientos</button>
   <button class="tab-btn" onclick="switchTab('radar')">🎯 Radar</button>
   <button class="tab-btn" onclick="switchTab('config')">⚙️ Config</button>
+  <button class="tab-btn tab-btn-logout" onclick="cerrarSesionApp()">🚪 Cerrar sesión</button>
 </nav>
 
 <div class="desktop-content">
@@ -670,7 +674,6 @@
       <p class="app-sub" style="text-align:left;margin-bottom:14px;">Sesión activa</p>
       <p class="sub-label">Conectado como</p>
       <p id="sesionEmailActual" style="font-size:14px;color:#1a1a1a;margin-bottom:14px;">—</p>
-      <button class="btn-danger" style="width:100%;padding:11px;border-radius:14px;" onclick="cerrarSesionApp()">Cerrar sesión</button>
     </div>
 
     <div class="config-subpanel active" id="configsub-localizaciones">
@@ -1929,14 +1932,21 @@
     if(facturadoFijo){
       return `<p style="font-size:13px;color:#2e7d32;font-weight:700;margin:6px 0 0;">💲 Precio cotizado: ${formatPesosCO(e.costoEnvio)}</p>`;
     }
+    // Si este envío quedó vinculado a la remesa de OTRO pedido (vinculoPedidoId presente), este
+    // pedido no fue el que registró la remesa: el precio cotizado queda fijo aquí (solo lectura,
+    // ya sincronizado) y solo se puede editar desde el pedido original que la registró.
+    if(e.vinculoPedidoId){
+      return e.costoEnvio!=null&&e.costoEnvio!==''
+        ? `<p style="font-size:13px;color:#555;margin:6px 0 0;">💲 Precio cotizado: ${formatPesosCO(e.costoEnvio)} <span style="font-size:11px;color:#aaa;">(se edita desde el pedido que registró la remesa)</span></p>`
+        : `<p style="font-size:12px;color:#aaa;margin:6px 0 0;">💲 Precio cotizado: pendiente <span style="font-size:11px;">(se edita desde el pedido que registró la remesa)</span></p>`;
+    }
     return `
       <p class="field-label" style="margin:8px 0 2px;">Precio cotizado</p>
       <div style="display:flex;align-items:center;gap:6px;">
         <span style="font-weight:700;color:#555;font-size:14px;">$</span>
-        <input type="number" id="precioCotizadoInput_${ei}" min="0" step="0.01" value="${e.costoEnvio??''}" placeholder="Ej: 150000" style="margin:0;flex:1;" />
+        <input type="text" inputmode="numeric" id="precioCotizadoInput_${ei}" value="${formatMilesCO(e.costoEnvio)}" placeholder="Ej: 150.000" style="margin:0;flex:1;" oninput="formatearInputDinero(this)" />
         <button type="button" class="btn-sm" style="background:#e8f5e9;color:#2e7d32;white-space:nowrap;" onclick="guardarPrecioCotizadoEnvio(${ei})">Guardar</button>
-      </div>
-      ${e.costoEnvio!=null&&e.costoEnvio!==''?`<p style="font-size:12px;color:#2e7d32;font-weight:700;margin:4px 0 0;">${formatPesosCO(e.costoEnvio)}</p>`:''}`;
+      </div>`;
   }
 
   function construirHtmlEnvioFoco(focoKey){
@@ -2352,10 +2362,11 @@
   // envío es una remesa compartida (vinculoId) se sincroniza con el otro pedido vinculado.
   window.guardarPrecioCotizadoEnvio=async function(ei){
     const input=document.getElementById(`precioCotizadoInput_${ei}`);
-    const valor=parseFloat(input?.value);
+    const valor=desformatearDinero(input?.value);
     if(isNaN(valor)||valor<0){toast('Escribe un precio cotizado válido',true);return;}
     const enviosNuevos=[...(pedidoActual.envios||[])];
     if(!enviosNuevos[ei]){toast('Envío no encontrado',true);return;}
+    if(enviosNuevos[ei].vinculoPedidoId){toast('Este precio se edita desde el pedido que registró la remesa',true);return;}
     const vinculoId=enviosNuevos[ei].vinculoId||null;
     enviosNuevos[ei]={...enviosNuevos[ei], costoEnvio:valor};
     await updateDoc(doc(db,'inv_pedidos',pedidoActual.id),{envios:enviosNuevos});
@@ -2466,8 +2477,8 @@
     return d.toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
   }
   // Formatea un valor en pesos siguiendo la nomenclatura contable local: apóstrofe entre
-  // millones y miles, punto entre miles y unidades. Ej: 1500000 -> "$ 1'500.000"
-  function formatPesosCO(valor){
+  // millones y miles, punto entre miles y unidades. Ej: 1500000 -> "1'500.000" (sin el símbolo $).
+  function formatMilesCO(valor){
     if(valor==null||valor==='') return '';
     const n=Math.round(Number(valor));
     if(isNaN(n)) return '';
@@ -2478,9 +2489,29 @@
     if(millones>0){
       const millonesFmt=millones.toString().replace(/\B(?=(\d{3})+(?!\d))/g,'.');
       const restoFmt=resto.toString().padStart(6,'0').replace(/^(\d{3})(\d{3})$/,'$1.$2');
-      return `$ ${signo}${millonesFmt}'${restoFmt}`;
+      return `${signo}${millonesFmt}'${restoFmt}`;
     }
-    return `$ ${signo}${abs.toString().replace(/\B(?=(\d{3})+(?!\d))/g,'.')}`;
+    return `${signo}${abs.toString().replace(/\B(?=(\d{3})+(?!\d))/g,'.')}`;
+  }
+  // Igual que formatMilesCO pero con el símbolo $ adelante. Ej: 1500000 -> "$ 1'500.000"
+  function formatPesosCO(valor){
+    const f=formatMilesCO(valor);
+    return f===''?'':`$ ${f}`;
+  }
+  // Reformatea EN VIVO, dentro del mismo campo, un input de dinero mientras se escribe: toma
+  // solo los dígitos ya tecleados y los vuelve a mostrar con la nomenclatura "1'500.000". Se usa
+  // en inputs type="text" (no number, porque el navegador no permite mostrar separadores ahí).
+  window.formatearInputDinero=function(input){
+    if(!input) return;
+    const soloDigitos=input.value.replace(/[^\d]/g,'');
+    input.value=soloDigitos===''?'':formatMilesCO(parseInt(soloDigitos,10));
+  }
+  // Quita el formato (apóstrofes y puntos) de un campo de dinero formateado y devuelve el
+  // número plano que se guarda en Firestore. Devuelve NaN si quedó vacío.
+  function desformatearDinero(valorStr){
+    if(valorStr==null) return NaN;
+    const limpio=String(valorStr).replace(/[.']/g,'').trim();
+    return limpio===''?NaN:parseInt(limpio,10);
   }
   function calcSetsAcople(subtipoAcople, equiposLista){
     const cfg=ACOPLES_CONFIG[subtipoAcople];
