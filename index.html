@@ -334,22 +334,28 @@
 <div id="loginOverlay" style="position:fixed;inset:0;background:#e8ede8;z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;">
   <div class="app-frame login-frame">
     <div class="app-title">📦 Inventario Bodega</div>
-    <div class="app-sub">Inicia sesión para continuar</div>
-    <form id="loginForm">
-      <div class="field-label">Correo</div>
-      <input type="text" id="loginEmail" autocomplete="username" required />
-      <div class="field-label">Contraseña</div>
-      <input type="password" id="loginPass" autocomplete="current-password" required style="width:100%;padding:11px 13px;font-size:15px;border:1.5px solid #ddd;border-radius:12px;outline:none;color:#1a1a1a;background:#fafafa;font-family:inherit;" />
-      <label style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:13px;color:#555;cursor:pointer;">
-        <input type="checkbox" id="loginRecordarCorreo" style="width:16px;height:16px;margin:0;" />
-        Recordar mi correo
-      </label>
-      <div style="margin-top:14px;display:flex;justify-content:center;">
-        <div class="g-recaptcha" id="loginRecaptcha" data-sitekey="6LcgGHUtAAAAAAtuG3oN5Q3SZpszzSHVtrjsV-LE"></div>
-      </div>
-      <button type="submit" class="btn-primary" id="loginBtn">Entrar</button>
-      <div id="loginError" style="color:#c62828;font-size:13px;margin-top:10px;text-align:center;display:none;"></div>
-    </form>
+    <!-- Mientras Firebase revisa si ya hay una sesión guardada (al recargar con F5), se
+         muestra este mensaje neutro en vez del formulario, para no mostrar "de flash" los
+         campos de inicio de sesión si el usuario ya estaba logueado. -->
+    <div id="loginCargando" class="loading" style="padding:30px 0;">Cargando...</div>
+    <div id="loginFormWrap" style="display:none;">
+      <div class="app-sub">Inicia sesión para continuar</div>
+      <form id="loginForm">
+        <div class="field-label">Correo</div>
+        <input type="text" id="loginEmail" autocomplete="username" required />
+        <div class="field-label">Contraseña</div>
+        <input type="password" id="loginPass" autocomplete="current-password" required style="width:100%;padding:11px 13px;font-size:15px;border:1.5px solid #ddd;border-radius:12px;outline:none;color:#1a1a1a;background:#fafafa;font-family:inherit;" />
+        <label style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:13px;color:#555;cursor:pointer;">
+          <input type="checkbox" id="loginRecordarCorreo" style="width:16px;height:16px;margin:0;" />
+          Recordar mi correo
+        </label>
+        <div style="margin-top:14px;display:flex;justify-content:center;">
+          <div class="g-recaptcha" id="loginRecaptcha" data-sitekey="6LcgGHUtAAAAAAtuG3oN5Q3SZpszzSHVtrjsV-LE"></div>
+        </div>
+        <button type="submit" class="btn-primary" id="loginBtn">Entrar</button>
+        <div id="loginError" style="color:#c62828;font-size:13px;margin-top:10px;text-align:center;display:none;"></div>
+      </form>
+    </div>
   </div>
 </div>
 
@@ -959,6 +965,8 @@
       const recordarChk=document.getElementById('loginRecordarCorreo');
       const correoGuardado=localStorage.getItem(LS_KEY_CORREO);
       if(correoGuardado){ emailInput.value=correoGuardado; recordarChk.checked=true; }
+      const loginCargando=document.getElementById('loginCargando');
+      const loginFormWrap=document.getElementById('loginFormWrap');
       onAuthStateChanged(auth, user=>{
         if(user){
           overlay.style.display='none';
@@ -967,6 +975,11 @@
           resolve(user); // llamar resolve() más de una vez no hace nada (ya se resolvió la 1ra vez)
         } else {
           overlay.style.display='flex';
+          // Ya se confirmó que no hay sesión guardada: recién ahí se revela el formulario
+          // (antes de esto se mostraba "Cargando..." para no dar el flash del formulario
+          // en los refrescos de página donde el usuario sí estaba logueado).
+          loginCargando.style.display='none';
+          loginFormWrap.style.display='block';
           if(typeof grecaptcha!=='undefined') try{ grecaptcha.reset(); }catch(e){}
         }
       });
