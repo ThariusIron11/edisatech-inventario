@@ -9292,7 +9292,13 @@
     if(!val){toast('Escribe una localización',true);return;}
     if(!sede){toast('Escribe la sede (ej: ENVIGADO)',true);return;}
     if(localizaciones.find(l=>l.nombre===val&&(l.sede||'')===sede)){toast('Ya existe esa localización en esa sede',true);return;}
-    await addDoc(collection(db,'inv_localizaciones'),{nombre:val,sede});
+    const ref=await addDoc(collection(db,'inv_localizaciones'),{nombre:val,sede});
+    // Actualiza la lista local de inmediato, sin esperar al eco en tiempo real de Firestore
+    // (en algunas sesiones/PWA ese eco tarda o no llega hasta reconectar).
+    if(!localizaciones.find(l=>l.id===ref.id)){
+      localizaciones.push({id:ref.id,nombre:val,sede});
+      renderLocalizaciones(); poblarSelectLoc(); renderInventario();
+    }
     document.getElementById('nuevaLoc').value='';
     document.getElementById('nuevaLocSede').value='';
     toast('✓ Localización agregada');
@@ -9311,12 +9317,15 @@
     if(!sede){toast('La sede no puede quedar vacía',true);return;}
     const etiquetaVieja=etiquetaLoc(l);
     await updateDoc(doc(db,'inv_localizaciones',id),{sede});
+    l.sede=sede; renderLocalizaciones(); poblarSelectLoc();
     const etiquetaNueva=`${l.nombre} - ${sede}`;
     if(etiquetaVieja!==etiquetaNueva){
       const afectados=equipos.filter(e=>e.localizacion===etiquetaVieja);
       for(const eq of afectados){
         await updateDoc(doc(db,'inv_equipos',eq.id),{localizacion:etiquetaNueva});
+        eq.localizacion=etiquetaNueva;
       }
+      renderInventario();
     }
     toast('✓ Sede actualizada');
   }
@@ -9324,6 +9333,8 @@
   window.eliminarLoc=async function(id){
     if(!confirm('¿Eliminar esta localización?')) return;
     await deleteDoc(doc(db,'inv_localizaciones',id));
+    const idx=localizaciones.findIndex(l=>l.id===id);
+    if(idx!==-1){ localizaciones.splice(idx,1); renderLocalizaciones(); poblarSelectLoc(); renderInventario(); }
     toast('✓ Eliminada');
   }
 
@@ -11446,11 +11457,17 @@
       if(equipos.find(e=>e.nombre.toLowerCase()===nombre.toLowerCase()&&e.tipo==='acople'&&e.compuesto)){
         toast('Ya existe un acople compuesto con ese nombre',true);return;
       }
-      await addDoc(collection(db,'inv_equipos'),{
+      const datosNuevo={
         nombre, tipo:'acople', compuesto:true, partes:catPartesTemp,
         minimoAcoples:parseInt(document.getElementById('catMinimoAcoples')?.value)||0,
         variante:'', localizacion:'S-117', disponible:0, reservado:0, peso:null, observacion:'', usaSerial:false
-      });
+      };
+      const ref=await addDoc(collection(db,'inv_equipos'),datosNuevo);
+      // Refleja el nuevo equipo de inmediato en las listas locales sin esperar el eco de Firestore.
+      if(!equipos.find(e=>e.id===ref.id)){
+        equipos.push({id:ref.id,...datosNuevo});
+        renderInventario(); renderResumen(); renderCatalogoEquipos(); renderRadar(); renderRadarAlertas(); renderPendientesAsignar();
+      }
       toast('✓ Acople compuesto agregado al catálogo');
       document.getElementById('catTipo').value='';
       document.getElementById('catNombre').value='';
@@ -11476,9 +11493,14 @@
       toast('Ya existe ese equipo con ese tipo, variante y localización',true);return;
     }
 
-    await addDoc(collection(db,'inv_equipos'),{
+    const datosNuevo={
       nombre, tipo:tipoObj.valor, compuesto:false, variante, localizacion:etiquetaLoc(locObj), disponible:cantidad, reservado:0, peso, observacion:obs, usaSerial
-    });
+    };
+    const ref=await addDoc(collection(db,'inv_equipos'),datosNuevo);
+    if(!equipos.find(e=>e.id===ref.id)){
+      equipos.push({id:ref.id,...datosNuevo});
+      renderInventario(); renderResumen(); renderCatalogoEquipos(); renderRadar(); renderRadarAlertas(); renderPendientesAsignar();
+    }
     toast('✓ Equipo agregado al catálogo');
     document.getElementById('catTipo').value='';
     document.getElementById('catNombre').value='';
