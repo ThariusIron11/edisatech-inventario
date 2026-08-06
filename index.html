@@ -7310,10 +7310,10 @@
       id=existente.id;
       nombreTexto=existente.nombre;
     } else {
-      const ref=await addDoc(collection(db,'inv_empresas'),{
-        nombre, tipo:'empresa', direccion:'', contraentrega:false, encargados:[], encargadoReparaciones:null
-      });
+      const datosNuevaEmp={nombre, tipo:'empresa', direccion:'', contraentrega:false, encargados:[], encargadoReparaciones:null};
+      const ref=await addDoc(collection(db,'inv_empresas'),datosNuevaEmp);
       id=ref.id;
+      if(!empresas.find(e=>e.id===ref.id)) empresas.push({id:ref.id,...datosNuevaEmp}); // no esperar al eco en tiempo real
       toast('✓ Empresa creada. Completa dirección y encargados en Config cuando puedas');
     }
     pedidoActual.clienteId=id;
@@ -7353,7 +7353,9 @@
     const emp=empresas.find(e=>e.id===pedidoActual.clienteId);
     if(!emp){toast('Primero elige o crea la empresa cliente',true);return;}
     if(!(emp.encargados||[]).some(n=>n.toLowerCase()===nombre.toLowerCase())){
-      await updateDoc(doc(db,'inv_empresas',emp.id),{encargados:[...(emp.encargados||[]),nombre]});
+      const nuevosEncargados=[...(emp.encargados||[]),nombre];
+      await updateDoc(doc(db,'inv_empresas',emp.id),{encargados:nuevosEncargados});
+      emp.encargados=nuevosEncargados; // no esperar al eco en tiempo real
       toast('✓ Encargado agregado a '+emp.nombre);
     }
     pedidoActual.encargado=nombre;
@@ -7461,7 +7463,9 @@
     if(val&&pedidoActual?.clienteId){
       const emp=empresas.find(e=>e.id===pedidoActual.clienteId);
       if(emp&&!(emp.encargados||[]).some(n=>n.toLowerCase()===val.toLowerCase())){
-        await updateDoc(doc(db,'inv_empresas',emp.id),{encargados:[...(emp.encargados||[]),val]});
+        const nuevosEncargados=[...(emp.encargados||[]),val];
+        await updateDoc(doc(db,'inv_empresas',emp.id),{encargados:nuevosEncargados});
+        emp.encargados=nuevosEncargados; // no esperar al eco en tiempo real
       }
     }
     pedidoActual.encargado=val;
@@ -9244,7 +9248,13 @@
     if(tipos.find(t=>t.valor===valor)){toast('Ya existe ese tipo',true);return;}
     const usados=tipos.length-TIPOS_BASE.filter(b=>tipos.find(t=>t.valor===b.valor)).length;
     const paleta=PALETA_TIPOS[usados%PALETA_TIPOS.length];
-    await addDoc(collection(db,'inv_tipos'),{valor,nombre,emoji,bg:paleta.bg,color:paleta.color,protegido:false});
+    const datosTipo={valor,nombre,emoji,bg:paleta.bg,color:paleta.color,protegido:false};
+    const ref=await addDoc(collection(db,'inv_tipos'),datosTipo);
+    // Actualiza la lista local de inmediato, sin esperar al eco en tiempo real de Firestore.
+    if(!tipos.find(t=>t.id===ref.id)){
+      tipos.push({id:ref.id,...datosTipo});
+      renderTipos(); poblarSelectTipo();
+    }
     inputNombre.value=''; inputEmoji.value='';
     toast('✓ Tipo agregado');
   }
@@ -9254,6 +9264,8 @@
     if(t?.protegido){toast('Este tipo es permanente',true);return;}
     if(!confirm(`¿Eliminar el tipo "${t?.nombre}"? Los equipos que ya lo tengan lo conservarán.`)) return;
     await deleteDoc(doc(db,'inv_tipos',id));
+    const idx=tipos.findIndex(x=>x.id===id);
+    if(idx!==-1){ tipos.splice(idx,1); renderTipos(); poblarSelectTipo(); }
     toast('✓ Tipo eliminado');
   }
 
@@ -9361,7 +9373,12 @@
     const val=document.getElementById('nuevoEnvio').value.trim();
     if(!val){toast('Escribe el nombre de la empresa',true);return;}
     if(envios.find(e=>e.nombre.toLowerCase()===val.toLowerCase())){toast('Ya existe',true);return;}
-    await addDoc(collection(db,'inv_envios'),{nombre:val});
+    const ref=await addDoc(collection(db,'inv_envios'),{nombre:val});
+    // Actualiza la lista local de inmediato, sin esperar al eco en tiempo real de Firestore.
+    if(!envios.find(e=>e.id===ref.id)){
+      envios.push({id:ref.id,nombre:val});
+      renderEnvios();
+    }
     document.getElementById('nuevoEnvio').value='';
     toast('✓ Empresa de envío agregada');
   }
@@ -9371,6 +9388,8 @@
     if(env&&(env.permanente||(env.nombre||'').toUpperCase()==='INTERNO')){toast('INTERNO es una etiqueta permanente y no se puede eliminar',true);return;}
     if(!confirm('¿Eliminar esta empresa de envío?')) return;
     await deleteDoc(doc(db,'inv_envios',id));
+    const idx=envios.findIndex(e=>e.id===id);
+    if(idx!==-1){ envios.splice(idx,1); renderEnvios(); }
     toast('✓ Eliminada');
   }
 
@@ -10915,10 +10934,10 @@
       id=existente.id;
       nombreTexto=existente.nombre;
     } else {
-      const ref=await addDoc(collection(db,'inv_empresas'),{
-        nombre, tipo:'empresa', direccion:'', contraentrega:false, encargados:[], encargadoReparaciones:null
-      });
+      const datosNuevaEmp={nombre, tipo:'empresa', direccion:'', contraentrega:false, encargados:[], encargadoReparaciones:null};
+      const ref=await addDoc(collection(db,'inv_empresas'),datosNuevaEmp);
       id=ref.id;
+      if(!empresas.find(e=>e.id===ref.id)) empresas.push({id:ref.id,...datosNuevaEmp}); // no esperar al eco en tiempo real
       toast('✓ Empresa creada. Completa dirección y encargados en Config cuando puedas');
     }
     reparacionActual.clienteId=id;
@@ -10944,6 +10963,7 @@
     const empresaSel=empresas.find(e=>e.id===r.clienteId);
     if(empresaSel&&!(empresaSel.encargadoReparaciones&&empresaSel.encargadoReparaciones.trim())&&r.encargado&&r.encargado.trim()){
       await updateDoc(doc(db,'inv_empresas',empresaSel.id),{encargadoReparaciones:r.encargado.trim()});
+      empresaSel.encargadoReparaciones=r.encargado.trim(); // no esperar al eco en tiempo real
     }
 
     // Resuelve el peso final de cada parte (fijo si es del catálogo) y guarda como
@@ -11040,7 +11060,12 @@
     const val=document.getElementById('nuevoTecnico').value.trim();
     if(!val){toast('Escribe el nombre del técnico',true);return;}
     if(tecnicos.find(t=>t.nombre.toLowerCase()===val.toLowerCase())){toast('Ya existe',true);return;}
-    await addDoc(collection(db,'inv_tecnicos'),{nombre:val});
+    const ref=await addDoc(collection(db,'inv_tecnicos'),{nombre:val});
+    // Actualiza la lista local de inmediato, sin esperar al eco en tiempo real de Firestore.
+    if(!tecnicos.find(t=>t.id===ref.id)){
+      tecnicos.push({id:ref.id,nombre:val});
+      renderTecnicos();
+    }
     document.getElementById('nuevoTecnico').value='';
     toast('✓ Técnico agregado');
   }
@@ -11048,6 +11073,8 @@
   window.eliminarTecnico=async function(id){
     if(!confirm('¿Eliminar este técnico?')) return;
     await deleteDoc(doc(db,'inv_tecnicos',id));
+    const idx=tecnicos.findIndex(t=>t.id===id);
+    if(idx!==-1){ tecnicos.splice(idx,1); renderTecnicos(); }
     toast('✓ Eliminado');
   }
 
@@ -11100,11 +11127,17 @@
     if(!nombre){toast('Escribe un nombre',true);return;}
     if(empresas.find(e=>e.nombre.toLowerCase()===nombre.toLowerCase())){toast('Ya existe una empresa/subsidiaria con ese nombre',true);return;}
 
-    await addDoc(collection(db,'inv_empresas'),{
+    const datosEmp={
       nombre, tipo, nit: nit||null, direccion, direccionRemision, contraentrega,
       encargados:[...nuevoEmpEncargados],
       encargadoReparaciones: encargadoReparaciones||null
-    });
+    };
+    const ref=await addDoc(collection(db,'inv_empresas'),datosEmp);
+    // Actualiza la lista local de inmediato, sin esperar al eco en tiempo real de Firestore.
+    if(!empresas.find(e=>e.id===ref.id)){
+      empresas.push({id:ref.id,...datosEmp});
+      renderEmpresas();
+    }
 
     document.getElementById('empNombre').value='';
     document.getElementById('empTipo').value='empresa';
@@ -11317,11 +11350,15 @@
     const duplicado=empresas.find(e=>e.id!==id&&e.nombre.toLowerCase()===nombre.toLowerCase());
     if(duplicado){toast('Ya existe otra empresa/subsidiaria con ese nombre',true);return;}
 
-    await updateDoc(doc(db,'inv_empresas',id),{
+    const cambiosEmp={
       nombre, tipo, nit: nit||null, direccion, direccionRemision, contraentrega,
       encargados:[...editEmpEncargados],
       encargadoReparaciones: encargadoReparaciones||null
-    });
+    };
+    await updateDoc(doc(db,'inv_empresas',id),cambiosEmp);
+    // Actualiza el objeto local de inmediato, sin esperar al eco en tiempo real de Firestore.
+    const emp=empresas.find(e=>e.id===id);
+    if(emp){ Object.assign(emp,cambiosEmp); renderEmpresas(); }
     toast('✓ Cambios guardados');
     document.getElementById('modalOverlay').classList.add('hidden');
   }
@@ -11329,6 +11366,8 @@
   window.eliminarEmpresa=async function(id){
     if(!confirm('¿Eliminar esta empresa/subsidiaria?')) return;
     await deleteDoc(doc(db,'inv_empresas',id));
+    const idx=empresas.findIndex(e=>e.id===id);
+    if(idx!==-1){ empresas.splice(idx,1); renderEmpresas(); }
     document.getElementById('modalOverlay').classList.add('hidden');
     toast('✓ Eliminada');
   }
