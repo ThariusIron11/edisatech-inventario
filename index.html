@@ -6018,6 +6018,7 @@
         const enviosNuevos=[...(p.envios||[])];
         enviosNuevos[idx]={...enviosNuevos[idx],remesa:valor};
         await updateDoc(doc(db,'inv_pedidos',p.id),{envios:enviosNuevos});
+        p.envios=enviosNuevos;
         actualizados++;
       }
     }catch(err){
@@ -6053,6 +6054,7 @@
         const enviosNuevos=[...(p.envios||[])];
         enviosNuevos[idx]={...enviosNuevos[idx],encargado:valor};
         await updateDoc(doc(db,'inv_pedidos',p.id),{envios:enviosNuevos});
+        p.envios=enviosNuevos;
         actualizados++;
       }
     }catch(err){
@@ -6091,6 +6093,7 @@
         const enviosNuevos=[...(p.envios||[])];
         enviosNuevos[idx]={...enviosNuevos[idx],entregado:true,fechaEntregado:new Date().toISOString()};
         await updateDoc(doc(db,'inv_pedidos',p.id),{envios:enviosNuevos});
+        p.envios=enviosNuevos; // actualiza YA el objeto local, sin esperar a que vuelva el onSnapshot (evita que quede "congelado" hasta refrescar la página, sobre todo en la app instalada)
         actualizados++;
       }
     }catch(err){
