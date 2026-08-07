@@ -222,6 +222,7 @@
     .mov-card{background:#f7f9f7;border:1.5px solid #d8e4d8;border-radius:14px;padding:12px 14px;margin-bottom:8px;}
     .mov-tipo-entrada{border-left:4px solid #2e7d32;}
     .mov-tipo-salida{border-left:4px solid #c62828;}
+    .mov-tipo-traslado{border-left:4px solid #1565c0;background:#f4f8fd;}
     .mov-card.mov-reparacion{border-left:4px solid #6a1b9a;}
     /* ── RADAR ── */
     .radar-card{background:#f7f9f7;border:1.5px solid #d8e4d8;border-radius:14px;padding:12px 14px;margin-bottom:8px;}
@@ -366,7 +367,7 @@
   <button class="tab-btn active" onclick="switchTab('inventario')">📦 Inventario</button>
   <button class="tab-btn" onclick="switchTab('pedidos')">📋 Pedidos</button>
   <button class="tab-btn" onclick="switchTab('reparaciones')">🔧 Reparaciones</button>
-  <button class="tab-btn" onclick="switchTab('entrada-salida')">↕️ Entrada/Salida</button>
+  <button class="tab-btn" onclick="switchTab('entrada-salida')">🧾 Registrar Movimiento</button>
   <button class="tab-btn" onclick="switchTab('movimientos')">🔄 Movimientos</button>
   <button class="tab-btn" onclick="switchTab('radar')">🎯 Radar</button>
   <button class="tab-btn" onclick="switchTab('config')">⚙️ Config</button>
@@ -510,6 +511,7 @@
     <div class="subtabs" id="entradaSalidaSubtabs">
       <button class="subtab-btn active" onclick="switchEntradaSalidaSubtab('entrada')">➕ Entrada</button>
       <button class="subtab-btn" onclick="switchEntradaSalidaSubtab('salida')">➖ Salida</button>
+      <button class="subtab-btn" onclick="switchEntradaSalidaSubtab('traslado')">🔀 Traslado</button>
     </div>
 
     <div class="config-subpanel active" id="essub-entrada">
@@ -605,6 +607,41 @@
       <p style="font-size:11px;color:#aaa;margin-top:0;margin-bottom:12px;">Obligatoria — aplica a todos los equipos de la lista. Solo se ve en Movimientos, no aparece en Inventario</p>
 
       <button class="btn-primary" onclick="registrarSalida()">✓ Registrar salida</button>
+    </div>
+
+    <div class="config-subpanel" id="essub-traslado">
+      <p class="app-title">🔀 Traslado de equipo</p>
+      <p class="app-sub">Cambiar un equipo de localización sin que entre ni salga de bodega</p>
+
+      <p class="field-label">Tipo de equipo</p>
+      <div class="autocomplete-wrap">
+        <input type="text" id="trasTipo" placeholder="Escribe o elige el tipo..." autocomplete="off" oninput="onInputTrasTipo()" onfocus="onInputTrasTipo()" />
+        <div class="autocomplete-list" id="trasTipoList"></div>
+      </div>
+
+      <p class="field-label">Equipo (elige la ubicación de la que sale)</p>
+      <div class="autocomplete-wrap">
+        <input type="text" id="trasEquipo" placeholder="Escribe el nombre del equipo..." autocomplete="off" oninput="onInputTrasEquipo()" onfocus="onInputTrasEquipo()" />
+        <div class="autocomplete-list" id="trasEquipoList"></div>
+      </div>
+
+      <p class="field-label">Localización actual</p>
+      <input type="text" id="trasLocOrigen" placeholder="Se llena al elegir el equipo" readonly style="background:#f0f0f0;color:#777;" />
+
+      <p class="field-label">Localización destino</p>
+      <div class="autocomplete-wrap">
+        <input type="text" id="trasLocDestino" placeholder="Escribe o elige la localización de destino..." autocomplete="off" oninput="onInputTrasLocDestino()" onfocus="onInputTrasLocDestino()" />
+        <div class="autocomplete-list" id="trasLocDestinoList"></div>
+      </div>
+
+      <p class="field-label">Cantidad</p>
+      <input type="number" id="trasCantidad" min="1" value="1" />
+
+      <p class="field-label">Observación de este traslado (opcional)</p>
+      <input type="text" id="trasObs" placeholder="Ej: Se reubicó para dejar espacio en B1" style="margin-bottom:6px;" />
+      <p style="font-size:11px;color:#aaa;margin-top:0;margin-bottom:12px;">Solo se ve en Movimientos, no afecta el total de entradas ni salidas</p>
+
+      <button class="btn-primary" style="background:#1565c0;" onclick="registrarTraslado()">✓ Registrar traslado</button>
     </div>
   </div>
 </div>
@@ -1291,7 +1328,7 @@
   }
 
   // ── SUBPESTAÑAS DE ENTRADA/SALIDA ──
-  const ENTRADA_SALIDA_SUBTABS=['entrada','salida'];
+  const ENTRADA_SALIDA_SUBTABS=['entrada','salida','traslado'];
   window.switchEntradaSalidaSubtab=function(sub){
     ENTRADA_SALIDA_SUBTABS.forEach((s,i)=>{
       document.getElementById('essub-'+s)?.classList.toggle('active', s===sub);
@@ -8832,6 +8869,107 @@
   }
 
   // ══════════════════════════════════════════
+  // TRASLADO — mueve un equipo de una localización a otra dentro de la misma bodega. No es
+  // entrada ni salida: el total de unidades en inventario no cambia, solo su ubicación. Descuenta
+  // del disponible del equipo en la localización de origen y lo suma (o crea el registro) en la
+  // localización de destino. Queda registrado en Movimientos con una ficha azul.
+  // ══════════════════════════════════════════
+  let trasEquipoIdSeleccionado=null; // id del equipo existente (ya amarrado a su localización de origen)
+
+  window.onInputTrasTipo=function(){
+    const q=document.getElementById('trasTipo').value.trim().toLowerCase();
+    const opciones=tipos.filter(t=>t.valor!=='motoreductor'&&(!q||t.nombre.toLowerCase().includes(q)));
+    renderAutocompleteList(document.getElementById('trasTipoList'), opciones.map(t=>({
+      label:`${t.emoji||''} ${t.nombre}`,
+      onClick:()=>{
+        document.getElementById('trasTipo').value=t.nombre;
+        closeAllAutocomplete();
+      }
+    })), 'Sin tipos que coincidan. Agrégalo en ⚙️ Config → Tipos de equipo');
+  }
+
+  window.onInputTrasEquipo=function(){
+    trasEquipoIdSeleccionado=null;
+    document.getElementById('trasLocOrigen').value='';
+    const q=document.getElementById('trasEquipo').value.trim().toLowerCase();
+    const tipoTxt=document.getElementById('trasTipo').value.trim().toLowerCase();
+    const tipoObj=tipos.find(t=>t.nombre.toLowerCase()===tipoTxt);
+    let candidatos=equipos.filter(e=>!e.compuesto); // los acoples compuestos no manejan stock propio
+    if(tipoObj) candidatos=candidatos.filter(e=>e.tipo===tipoObj.valor);
+    if(q) candidatos=candidatos.filter(e=>e.nombre.toLowerCase().includes(q)||e.variante?.toLowerCase().includes(q));
+    renderAutocompleteList(document.getElementById('trasEquipoList'), candidatos.slice(0,30).map(eq=>({
+      label:`<strong>${eq.nombre}</strong>${eq.variante?` <span style="color:#4527a0;">· ${eq.variante}</span>`:''}<small>${eq.localizacion} · ${eq.disponible||0} disp</small>`,
+      onClick:()=>{
+        document.getElementById('trasEquipo').value=eq.nombre;
+        trasEquipoIdSeleccionado=eq.id;
+        const t=tipos.find(t2=>t2.valor===eq.tipo);
+        if(t) document.getElementById('trasTipo').value=t.nombre;
+        document.getElementById('trasLocOrigen').value=eq.localizacion;
+        closeAllAutocomplete();
+      }
+    })), q?'Sin coincidencias — un traslado necesita un equipo que ya exista en el inventario':null);
+  }
+
+  window.onInputTrasLocDestino=function(){
+    const q=document.getElementById('trasLocDestino').value.trim().toLowerCase();
+    const opciones=localizaciones.filter(l=>!q||etiquetaLoc(l).toLowerCase().includes(q));
+    renderAutocompleteList(document.getElementById('trasLocDestinoList'), opciones.map(l=>({
+      label:etiquetaLoc(l),
+      onClick:()=>{
+        document.getElementById('trasLocDestino').value=etiquetaLoc(l);
+        closeAllAutocomplete();
+      }
+    })), 'Sin localizaciones que coincidan. Agrégala en ⚙️ Config');
+  }
+
+  window.registrarTraslado=async function(){
+    if(!trasEquipoIdSeleccionado){toast('Elige el equipo desde la lista (debe indicar de qué localización sale)',true);return;}
+    const eqOrigen=equipos.find(e=>e.id===trasEquipoIdSeleccionado);
+    if(!eqOrigen){toast('Ese equipo ya no existe, actualiza la búsqueda',true);return;}
+
+    const locDestinoTxt=document.getElementById('trasLocDestino').value.trim();
+    const locDestinoObj=localizaciones.find(l=>etiquetaLoc(l).toLowerCase()===locDestinoTxt.toLowerCase());
+    const cantidad=parseInt(document.getElementById('trasCantidad').value)||0;
+    const obs=document.getElementById('trasObs').value.trim();
+
+    if(!locDestinoObj){toast('Escribe/elige una localización de destino válida de la lista',true);return;}
+    if(etiquetaLoc(locDestinoObj)===eqOrigen.localizacion){toast('La localización de destino debe ser distinta a la actual',true);return;}
+    if(cantidad<=0){toast('Cantidad inválida',true);return;}
+    if((eqOrigen.disponible||0)<cantidad){toast(`Solo hay ${eqOrigen.disponible||0} disponibles de "${nombreConVariante(eqOrigen)}" en ${eqOrigen.localizacion}`,true);return;}
+
+    const locOrigenTexto=eqOrigen.localizacion;
+    const locDestinoTexto=etiquetaLoc(locDestinoObj);
+    const equipoNombre=nombreConVariante(eqOrigen);
+
+    await updateDoc(doc(db,'inv_equipos',eqOrigen.id),{ disponible:increment(-cantidad) });
+
+    let eqDestino=equipos.find(e=>e.nombre.toLowerCase()===eqOrigen.nombre.toLowerCase()&&e.tipo===eqOrigen.tipo&&(e.variante||'').toLowerCase()===(eqOrigen.variante||'').toLowerCase()&&e.localizacion===locDestinoTexto);
+    if(eqDestino){
+      await updateDoc(doc(db,'inv_equipos',eqDestino.id),{ disponible:increment(cantidad) });
+    } else {
+      await addDoc(collection(db,'inv_equipos'),{
+        nombre:eqOrigen.nombre, tipo:eqOrigen.tipo, variante:eqOrigen.variante||'', localizacion:locDestinoTexto,
+        disponible:cantidad, reservado:0, observacion:''
+      });
+    }
+
+    await addDoc(collection(db,'inv_movimientos'),{
+      tipo:'traslado', equipoId:eqOrigen.id, equipoNombre, cantidad,
+      localizacionOrigen:locOrigenTexto, localizacionDestino:locDestinoTexto,
+      observacion:obs, fecha:serverTimestamp()
+    });
+
+    toast('✓ Traslado registrado');
+    document.getElementById('trasTipo').value='';
+    document.getElementById('trasEquipo').value='';
+    document.getElementById('trasLocOrigen').value='';
+    document.getElementById('trasLocDestino').value='';
+    document.getElementById('trasCantidad').value='1';
+    document.getElementById('trasObs').value='';
+    trasEquipoIdSeleccionado=null;
+  }
+
+  // ══════════════════════════════════════════
   // MOVIMIENTOS
   // ══════════════════════════════════════════
   // ⚠️ TEMPORAL — solo para desarrollo/pruebas. Quitar este botón/función
@@ -9078,6 +9216,8 @@
       m.equipoNombre?.toLowerCase().includes(q)
       || m.observacion?.toLowerCase().includes(q)
       || m.localizacion?.toLowerCase().includes(q)
+      || m.localizacionOrigen?.toLowerCase().includes(q)
+      || m.localizacionDestino?.toLowerCase().includes(q)
       || m.remision?.toLowerCase().includes(q)
       || m.pedidoNombre?.toLowerCase().includes(q)
     );
@@ -9116,13 +9256,13 @@
           <div style="display:flex;justify-content:space-between;align-items:flex-start;">
             <div style="flex:1;">
               <p style="font-size:14px;font-weight:700;color:#1b2a1b;">${m.equipoNombre}${m.deReparacion?' <span style="font-size:10.5px;font-weight:700;color:#6a1b9a;background:#f3e5f5;padding:1px 6px;border-radius:4px;vertical-align:middle;">REPARACIÓN</span>':''}</p>
-              <p style="font-size:12px;color:#777;margin-top:2px;">${formatHora(m.fecha)} · ${m.localizacion||''}</p>
+              <p style="font-size:12px;color:#777;margin-top:2px;">${formatHora(m.fecha)} · ${m.tipo==='traslado'?`${m.localizacionOrigen||''} → ${m.localizacionDestino||''}`:(m.localizacion||'')}</p>
               ${m.remision?`<p style="font-size:12px;color:#555;margin-top:2px;">📄 ${m.remision}${m.pedidoNombre?' – '+m.pedidoNombre:''}</p>`:''}
               ${m.observacion?`<p style="font-size:11px;color:#aaa;font-style:italic;margin-top:2px;">📝 ${m.observacion}</p>`:''}
             </div>
             <div style="text-align:right;">
-              <span style="font-size:18px;font-weight:900;color:${m.deReparacion?'#6a1b9a':(m.tipo==='entrada'?'#2e7d32':'#c62828')};">${m.deReparacion?'':`${m.tipo==='entrada'?'+':'-'}${m.cantidad}`}</span>
-              <br/><span style="font-size:11px;color:${m.deReparacion?'#6a1b9a':'#aaa'};">${m.tipo==='entrada'?'ENTRADA':'SALIDA'}</span>
+              <span style="font-size:18px;font-weight:900;color:${m.deReparacion?'#6a1b9a':(m.tipo==='traslado'?'#1565c0':(m.tipo==='entrada'?'#2e7d32':'#c62828'))};">${m.deReparacion?'':(m.tipo==='traslado'?`🔀${m.cantidad}`:`${m.tipo==='entrada'?'+':'-'}${m.cantidad}`)}</span>
+              <br/><span style="font-size:11px;color:${m.deReparacion?'#6a1b9a':(m.tipo==='traslado'?'#1565c0':'#aaa')};">${m.tipo==='traslado'?'TRASLADO':(m.tipo==='entrada'?'ENTRADA':'SALIDA')}</span>
               ${(m.tipo==='entrada'&&!m.noEditable)?`<br/><button class="btn-sm" style="background:none;color:#1b2a1b;padding:2px 6px;margin-top:4px;" onclick="editarMovimiento('${m.id}')">✏️</button><button class="btn-sm" style="background:none;color:#c62828;padding:2px 6px;margin-top:4px;" onclick="eliminarMovimiento('${m.id}')">🗑️</button>`:''}
               ${(m.tipo==='salida'&&m.pedidoId)?`<br/><button class="btn-sm" style="background:none;color:#1565c0;padding:2px 6px;margin-top:4px;" onclick="document.getElementById('modalOverlay').classList.add('hidden');switchTab('pedidos');setTimeout(()=>abrirPedido('${m.pedidoId}'),50);">📋 Ver pedido</button>`:''}
             </div>
