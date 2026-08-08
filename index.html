@@ -139,6 +139,9 @@
     input:focus,textarea:focus,select:focus{border-color:#1b2a1b;background:#fff;}
     input::placeholder,textarea::placeholder{color:#bbb;}
     select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23999' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center;}
+    /* Quita las flechas de subir/bajar de los inputs numéricos marcados como .no-spinner */
+    input.no-spinner::-webkit-outer-spin-button,input.no-spinner::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+    input.no-spinner[type="number"]{-moz-appearance:textfield;appearance:textfield;}
     .field-label{font-size:13px;color:#555;margin-bottom:6px;font-weight:500;margin-top:14px;}
     .sub-label{font-size:10px;color:#aaa;text-transform:uppercase;letter-spacing:0.4px;font-weight:600;margin-bottom:6px;}
     /* ── BUTTONS ── */
@@ -223,6 +226,7 @@
     .mov-tipo-entrada{border-left:4px solid #2e7d32;}
     .mov-tipo-salida{border-left:4px solid #c62828;}
     .mov-tipo-traslado{border-left:4px solid #1565c0;background:#f4f8fd;}
+    .mov-armado{border-left:4px solid #f9a825!important;background:#fffde7!important;}
     .mov-card.mov-reparacion{border-left:4px solid #6a1b9a;}
     /* ── RADAR ── */
     .radar-card{background:#f7f9f7;border:1.5px solid #d8e4d8;border-radius:14px;padding:12px 14px;margin-bottom:8px;}
@@ -772,14 +776,14 @@
           <div class="autocomplete-list" id="catLocList"></div>
         </div>
         <p class="field-label">Cantidad inicial disponible</p>
-        <input type="number" id="catCantidad" min="0" value="0" />
+        <input type="number" id="catCantidad" class="no-spinner" min="0" value="0" />
         <p class="field-label">Peso en kg (opcional)</p>
-        <input type="number" id="catPeso" min="0" step="0.01" placeholder="Ej: 12.5" />
+        <input type="number" id="catPeso" class="no-spinner" min="0" step="0.01" placeholder="Ej: 12.5" />
         <p class="field-label">Observación (opcional)</p>
         <input type="text" id="catObs" placeholder="Ej: Reacondicionado, sin brida..." />
         <label style="display:flex;align-items:center;gap:8px;margin:10px 0;cursor:pointer;">
           <input type="checkbox" id="catUsaSerial" style="width:18px;height:18px;flex-shrink:0;" />
-          <span style="font-size:13px;">¿N° Serial? <span style="color:#888;font-size:11px;">(si maneja serial individual, como motor/reductor/motoreductor)</span></span>
+          <span style="font-size:13px;">¿N° Serial? <span style="color:#888;font-size:11px;" id="catUsaSerialNota">(si maneja serial individual, como motor/reductor/motoreductor)</span></span>
         </label>
         </div>
         <div id="catPartesWrap" style="display:none;">
@@ -1126,6 +1130,16 @@
   function tipoUsaSeries(equipoTipo){
     return equipoTipo==='motor'||equipoTipo==='reductor'||equipoTipo==='motoreductor'||equipoTipo==='motovibrador';
   }
+  // Motor y Reductor SIEMPRE manejan serial individual — no es opcional, así que el checkbox
+  // "¿N° Serial?" para estos dos tipos queda marcado y bloqueado (no se puede desmarcar).
+  function tipoTieneSerialFijo(equipoTipo){
+    return equipoTipo==='motor'||equipoTipo==='reductor';
+  }
+  // Solo Reductor y Motoreductor pueden marcarse como "Armado" (armados con piezas sueltas del
+  // inventario en vez de salir ya completos del stock del catálogo).
+  function tipoAdmiteArmado(equipoTipo){
+    return equipoTipo==='reductor'||equipoTipo==='motoreductor';
+  }
   // Igual que tipoUsaSeries, pero también respeta el flag "¿N° Serial?" configurado por equipo
   // (Catálogo/Inventario) para tipos que no lo traen forzado de fábrica.
   function itemUsaSeries(item){
@@ -1436,6 +1450,25 @@
       }));
     }
     return [{equipoId:item.equipoId,equipoNombre:item.equipoNombre,cantidad:qty}];
+  }
+  // Igual que partesFisicasDeItem, pero para un despacho por unidades específicas (reg.tipo==='serial'):
+  // separa las unidades marcadas "armado" de las normales, porque las armadas generan una ficha de
+  // salida distinta (amarilla, "ARMADO") con las piezas que se usaron para construirlas adjuntas —
+  // no una salida normal del equipo del catálogo.
+  function partesFisicasDeItemPorUnidades(item,unidadIndices){
+    const armadoIdx=unidadIndices.filter(j=>item.unidades?.[j]?.armado);
+    const normalIdx=unidadIndices.filter(j=>!item.unidades?.[j]?.armado);
+    const partesNormales=normalIdx.length>0?partesFisicasDeItem(item,normalIdx.length):[];
+    if(armadoIdx.length===0) return partesNormales;
+    const piezasArmado=armadoIdx.flatMap(j=>{
+      const u=item.unidades[j];
+      const serial=item.equipoTipo==='motoreductor'
+        ?`Motor: ${u.motorSerial||'sin serial'} · Reductor: ${u.reductorSerial||'sin serial'}`
+        :(u.serial?`Serial: ${u.serial}`:`Unidad ${j+1}`);
+      return (u.piezasUsadas||[]).map(pz=>({...pz,unidadSerial:serial}));
+    });
+    const partesArmado=partesFisicasDeItem(item,armadoIdx.length).map(p=>({...p,armado:true,piezasArmado:piezasArmado}));
+    return [...partesNormales,...partesArmado];
   }
   // Peso por unidad de un ítem de pedido (kg). Si falta el dato en algún equipo, cuenta como 0 —
   // el peso es opcional y nunca debe bloquear ni distorsionar el total con valores inventados.
@@ -3419,8 +3452,8 @@
       <p class="field-label">Observación</p>
       <input type="text" id="editObsEq" value="${eq.observacion||''}" placeholder="Sin observación" style="margin-bottom:10px;"/>
       <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;cursor:pointer;">
-        <input type="checkbox" id="editUsaSerialEq" ${eq.usaSerial?'checked':''} style="width:18px;height:18px;flex-shrink:0;" />
-        <span style="font-size:13px;">¿N° Serial? <span style="color:#888;font-size:11px;">(si maneja serial individual, como motor/reductor/motoreductor)</span></span>
+        <input type="checkbox" id="editUsaSerialEq" ${(eq.usaSerial||tipoTieneSerialFijo(eq.tipo))?'checked':''} ${tipoTieneSerialFijo(eq.tipo)?'disabled':''} style="width:18px;height:18px;flex-shrink:0;" />
+        <span style="font-size:13px;">¿N° Serial? <span style="color:#888;font-size:11px;" id="editUsaSerialEqNota">${tipoTieneSerialFijo(eq.tipo)?'(obligatorio para Motor/Reductor, siempre manejan serial individual)':'(si maneja serial individual, como motor/reductor/motoreductor)'}</span></span>
       </label>
       <button class="btn-secondary" style="text-align:center;" onclick="guardarCambiosEquipo('${eq.id}')">💾 Guardar cambios</button>
       <hr class="divider"/>
@@ -3592,8 +3625,26 @@
       onClick:()=>{
         document.getElementById('editTipoEq').value=t.nombre;
         closeAllAutocomplete();
+        actualizarEditUsaSerialSegunTipo();
       }
     })), 'Sin tipos que coincidan');
+  }
+
+  // Igual que actualizarCatUsaSerialSegunTipo, pero para el modal de editar un equipo existente.
+  window.actualizarEditUsaSerialSegunTipo=function(){
+    const tipoTxt=document.getElementById('editTipoEq')?.value.trim().toLowerCase()||'';
+    const tipoObj=tipos.find(t=>t.nombre.toLowerCase()===tipoTxt);
+    const chk=document.getElementById('editUsaSerialEq');
+    const nota=document.getElementById('editUsaSerialEqNota');
+    if(!chk) return;
+    if(tipoObj&&tipoTieneSerialFijo(tipoObj.valor)){
+      chk.checked=true;
+      chk.disabled=true;
+      if(nota) nota.textContent='(obligatorio para Motor/Reductor, siempre manejan serial individual)';
+    } else {
+      chk.disabled=false;
+      if(nota) nota.textContent='(si maneja serial individual, como motor/reductor/motoreductor)';
+    }
   }
 
   window.onInputEditLocEq=function(){
@@ -4684,7 +4735,7 @@
     const movRef=await addDoc(collection(db,'inv_movimientos'),{
       tipo:'salida', equipoId, equipoNombre, cantidad,
       localizacion:eq.localizacion||'',
-      observacion:`Usada para completar ${nombreItemPedido(item)} (${serialRef}) · Pedido ${tituloPedido(p)}${nota?' · '+nota:''}`,
+      observacion:`Se usó para armar ${nombreItemPedido(item)} (${serialRef}) · Pedido ${tituloPedido(p)}${nota?' · '+nota:''}`,
       pedidoId:p.id, fecha:serverTimestamp()
     });
 
@@ -4695,6 +4746,60 @@
 
     piezasUsadasAbierta.delete(key);
     toast('✓ Pieza registrada y descontada del inventario');
+    renderModalPedido();
+  }
+
+  // ══════════ MARCAR UNIDADES COMO "ARMADO" (Reductor / Motoreductor) ══════════
+  // Una unidad "armada" se construyó con piezas sueltas del inventario (registradas abajo con
+  // "Agregar pieza para armar esta unidad") en vez de salir ya completa del stock de ese
+  // reductor/motoreductor en el catálogo. Al despachar, esa unidad genera una ficha de salida
+  // amarilla "ARMADO" en vez de la salida normal, con la lista de piezas usadas adjunta.
+  window.abrirMarcarArmado=function(pedidoId,itemIndex){
+    const p=pedidos.find(x=>x.id===pedidoId)||pedidoActual;
+    const item=(p?.items||[])[itemIndex];
+    if(!item||!(item.unidades||[]).length){toast('Este ítem no tiene unidades con serie',true);return;}
+    const filas=item.unidades.map((u,j)=>{
+      const label=item.equipoTipo==='motoreductor'
+        ?`Motor: ${u.motorSerial||'sin serial'} · Reductor: ${u.reductorSerial||'sin serial'}`
+        :(u.serial?`Serial: ${u.serial}`:'sin serial');
+      return `<label style="display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:8px;background:${u.armado?'#fff8e1':'#f7f9f7'};margin-bottom:6px;cursor:pointer;">
+        <input type="checkbox" class="chk-armado-unidad" data-idx="${j}" ${u.armado?'checked':''} style="width:18px;height:18px;flex-shrink:0;" />
+        <span style="font-size:13px;">Unidad ${j+1} — ${label}</span>
+      </label>`;
+    }).join('');
+    document.getElementById('modalTitulo').textContent='🔧 Marcar como Armado';
+    document.getElementById('modalSub').textContent=`${nombreItemPedido(item)} · marca cuáles unidades se armaron con piezas del inventario`;
+    document.getElementById('modalContenido').innerHTML=`
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <button class="btn-secondary" style="flex:1;text-align:center;" onclick="marcarTodosArmado(true)">✅ TODOS</button>
+        <button class="btn-secondary" style="flex:1;text-align:center;" onclick="marcarTodosArmado(false)">◻️ Ninguno</button>
+      </div>
+      <div id="listaArmadoUnidades">${filas}</div>
+      <button class="btn-primary" style="margin-top:10px;" onclick="guardarMarcarArmado('${pedidoId}',${itemIndex})">💾 Guardar</button>
+    `;
+    document.querySelector('#modalOverlay .modal-box')?.classList.remove('modal-box-mitad');
+    document.getElementById('modalOverlay').classList.remove('hidden');
+  }
+
+  window.marcarTodosArmado=function(valor){
+    document.querySelectorAll('.chk-armado-unidad').forEach(chk=>{chk.checked=valor;});
+  }
+
+  window.guardarMarcarArmado=async function(pedidoId,itemIndex){
+    const p=pedidos.find(x=>x.id===pedidoId);
+    if(!p) return;
+    const item=(p.items||[])[itemIndex];
+    if(!item) return;
+    const checks=[...document.querySelectorAll('.chk-armado-unidad')];
+    const nuevasUnidades=item.unidades.map((u,j)=>{
+      const chk=checks.find(c=>parseInt(c.dataset.idx)===j);
+      return {...u, armado:!!chk?.checked};
+    });
+    const itemsNuevos=p.items.map((it,i)=>i===itemIndex?{...it,unidades:nuevasUnidades}:it);
+    await updateDoc(doc(db,'inv_pedidos',pedidoId),{items:itemsNuevos});
+    if(pedidoActual&&pedidoActual.id===pedidoId) pedidoActual.items=itemsNuevos;
+    toast('✓ Unidades armadas actualizadas');
+    document.getElementById('modalOverlay').classList.add('hidden');
     renderModalPedido();
   }
 
@@ -6979,6 +7084,7 @@
                 ${item.tieneBrazo?`<br/><span style="font-size:15px;">${brazoAsignado?`${item.brazo.equipoNombre} X ${item.cantidad} und`:'<span style="color:#e65100;">Brazo sin asignar</span>'}</span>`:''}
                 ${item.tieneEjeSolido?`<br/><span style="font-size:15px;">${ejeSolidoAsignado?`${item.eje_solido.equipoNombre} X ${item.cantidad} und`:'<span style="color:#e65100;">Eje sólido sin asignar</span>'}</span>`:''}
                 ${pendStock>0&&(motorAsignado||reductorAsignado||brazoAsignado||ejeSolidoAsignado)?`<br/><span style="font-size:12px;color:#e65100;">⏳ Falta cubrir: ${pendStock}</span>`:''}
+                ${(item.unidades||[]).filter(u=>u.armado).length>0?`<br/><span style="font-size:12px;color:#f57f17;">🔧 Armadas: ${(item.unidades||[]).filter(u=>u.armado).length} de ${item.unidades.length}</span>`:''}
                 ${ocGenerica}
               </td>
               <td>-</td>
@@ -7024,6 +7130,7 @@
                             :`<button class="btn-sm" style="background:#e8f5e9;color:#2e7d32;white-space:nowrap;" onclick="abrirAsignarComponente('${pedidoActual.id}',${i},'eje_solido')">🔩 Asignar eje sólido</button>`}
                           <button class="btn-sm" style="background:#fce4ec;color:#c62828;white-space:nowrap;" ${!puedeRetirar?'disabled':''} onclick="quitarEjeSolidoDeMotoreductor('${pedidoActual.id}',${i})">- Eje sólido</button>`
                         :`<button class="btn-sm" style="background:#eceff1;color:#37474f;white-space:nowrap;" onclick="adicionarEjeSolidoAMotoreductor('${pedidoActual.id}',${i})">+ Eje sólido</button>`}
+                      ${(item.unidades||[]).length>0?`<button class="btn-sm" style="background:#fff8e1;color:#f57f17;white-space:nowrap;" onclick="abrirMarcarArmado('${pedidoActual.id}',${i})">🔧 Armado</button>`:''}
                       ${item.deReparacion?'':`<button class="btn-sm" style="background:#eee;color:#666;white-space:nowrap;" onclick="editarCantidadItemPedido('${pedidoActual.id}',${i})">✏️ Cant.</button>`}
                       ${item.deReparacion?`<button class="btn-sm" style="background:#fff3e0;color:#e65100;white-space:nowrap;" ${!puedeRetirar?'disabled':''} onclick="resetearReparacionPedido('${pedidoActual.id}',${i})">🔁 Restablecer</button>`:''}
                       <button class="btn-sm" style="background:#eee;color:#666;white-space:nowrap;" onclick="editarOrdenCompraItemPedido('${pedidoActual.id}',${i})">🧾 OC</button>
@@ -7056,7 +7163,7 @@
                     const cubP=p.cubierto||0;
                     return `<span style="font-size:13px;">${p.nombre} X ${necesario} und${p.localizacion?` <span style="color:#999;">· ${p.localizacion}</span>`:''}${cubP<necesario?` <span style="color:#e65100;">(reservado ${cubP})</span>`:''}</span><br/>`;
                   }).join('')
-                :`<span style="font-size:12px;color:#aaa;">${badgeHTML(item.equipoTipo)}</span>`}${pendStock>0?`<br/><span style="font-size:12px;color:#e65100;">⏳ Pendiente de asignar: ${pendStock}</span>`:''}${ocHtmlLone}</td>
+                :`<span style="font-size:12px;color:#aaa;">${badgeHTML(item.equipoTipo)}</span>`}${pendStock>0?`<br/><span style="font-size:12px;color:#e65100;">⏳ Pendiente de asignar: ${pendStock}</span>`:''}${(item.unidades||[]).filter(u=>u.armado).length>0?`<br/><span style="font-size:12px;color:#f57f17;">🔧 Armadas: ${(item.unidades||[]).filter(u=>u.armado).length} de ${item.unidades.length}</span>`:''}${ocHtmlLone}</td>
             <td><span class="badge-loc">${item.localizacion||'-'}</span></td>
             <td>${item.cantidad}</td>
             <td class="qty-ok">${cub}</td>
@@ -7078,6 +7185,7 @@
                         :`
                           <button class="btn-sm" style="background:#eee;color:#666;white-space:nowrap;" onclick="editarCantidadItemPedido('${pedidoActual.id}',${i})">✏️ Cant.</button>
                           ${liberable>0?`<button class="btn-sm" style="background:#eee;color:#666;white-space:nowrap;" onclick="desasignarPedidoItem('${pedidoActual.id}',${i})">↩ Liberar</button>`:''}
+                          ${(tipoAdmiteArmado(item.equipoTipo)&&(item.unidades||[]).length>0)?`<button class="btn-sm" style="background:#fff8e1;color:#f57f17;white-space:nowrap;" onclick="abrirMarcarArmado('${pedidoActual.id}',${i})">🔧 Armado</button>`:''}
                         `}
                       <button class="btn-sm" style="background:#eee;color:#666;white-space:nowrap;" onclick="editarOrdenCompraItemPedido('${pedidoActual.id}',${i})">🧾 OC</button>
                     `:''}
@@ -8055,13 +8163,14 @@
         const item=items[reg.itemIndex];
         if(!item) continue;
         const qty=reg.tipo==='serial'?(reg.unidadIndices||[]).length:reg.cantidad;
-        const partes=partesFisicasDeItem(item,qty);
+        const partes=reg.tipo==='serial'?partesFisicasDeItemPorUnidades(item,reg.unidadIndices||[]):partesFisicasDeItem(item,qty);
         for(const parte of partes){
           await addDoc(collection(db,'inv_movimientos'),{
             tipo:'salida', equipoId:parte.equipoId, equipoNombre:parte.equipoNombre,
             cantidad:parte.cantidad, remision:r.remision, pedidoId:pedido.id,
             pedidoNombre:tituloPedido(pedido), fecha:serverTimestamp(),
-            ...(parte.equipoId?{}:{deReparacion:true})
+            ...(parte.equipoId?{}:{deReparacion:true}),
+            ...(parte.armado?{armado:true, piezasArmado:parte.piezasArmado||[]}:{})
           });
         }
       }
@@ -8980,11 +9089,21 @@
   // Editar un movimiento de entrada: solo Cantidad (recalcula el disponible) y Observación.
   // El equipo/tipo/localización no se editan aquí — si se equivocaron de equipo, se borra
   // (papelera) y se registra una entrada nueva correcta.
+  // Ventana de tiempo para poder editar/eliminar una entrada: pasadas estas horas queda
+  // bloqueada, para que nadie ajuste registros viejos sin dejar rastro claro.
+  const HORAS_LIMITE_EDITAR_ENTRADA=24;
+  function movDentroDeVentanaEdicion(m){
+    const d=m.fecha?.toDate?m.fecha.toDate():new Date(m.fecha||Date.now());
+    const horas=(Date.now()-d.getTime())/3600000;
+    return horas<HORAS_LIMITE_EDITAR_ENTRADA;
+  }
+
   window.editarMovimiento=function(id){
     const m=movimientos.find(x=>x.id===id);
     if(!m) return;
     if(m.tipo!=='entrada'){toast('Por ahora solo se pueden editar movimientos de entrada',true);return;}
     if(m.noEditable){toast('Este movimiento (separar/unir ZD) no se puede editar',true);return;}
+    if(!movDentroDeVentanaEdicion(m)){toast(`Ya pasaron ${HORAS_LIMITE_EDITAR_ENTRADA}h desde esta entrada, no se puede editar`,true);return;}
     document.getElementById('modalTitulo').textContent='Editar entrada';
     document.getElementById('modalSub').textContent=`${m.equipoNombre} · ${formatFecha(m.fecha)}`;
     document.getElementById('modalContenido').innerHTML=`
@@ -9001,6 +9120,7 @@
   window.guardarEdicionMovimiento=async function(id){
     const m=movimientos.find(x=>x.id===id);
     if(!m) return;
+    if(!movDentroDeVentanaEdicion(m)){toast(`Ya pasaron ${HORAS_LIMITE_EDITAR_ENTRADA}h desde esta entrada, no se puede editar`,true);document.getElementById('modalOverlay').classList.add('hidden');return;}
     const nuevaCantidad=parseInt(document.getElementById('editMovCantidad').value)||0;
     const nuevaObs=document.getElementById('editMovObs').value.trim();
     if(nuevaCantidad<=0){toast('Cantidad inválida',true);return;}
@@ -9029,6 +9149,7 @@
     if(!m) return;
     if(m.tipo!=='entrada'){toast('Por ahora solo se pueden eliminar movimientos de entrada',true);return;}
     if(m.noEditable){toast('Este movimiento (separar/unir ZD) no se puede eliminar',true);return;}
+    if(!movDentroDeVentanaEdicion(m)){toast(`Ya pasaron ${HORAS_LIMITE_EDITAR_ENTRADA}h desde esta entrada, no se puede eliminar`,true);return;}
     const eq=equipos.find(e=>e.id===m.equipoId);
     if(eq){
       const nuevoDisp=(eq.disponible||0)-m.cantidad;
@@ -9205,6 +9326,13 @@
     renderMovimientos();
   }
 
+  // ids de movimientos ARMADO con la lista de piezas usadas desplegada (oculta por defecto)
+  let movArmadoAbierto=new Set();
+  window.toggleMovArmado=function(id){
+    if(movArmadoAbierto.has(id)) movArmadoAbierto.delete(id); else movArmadoAbierto.add(id);
+    renderMovimientos();
+  }
+
   window.renderMovimientos=function(){
     const lista=document.getElementById('listaMovimientos');
     if(!lista) return;
@@ -9252,18 +9380,20 @@
     lista.innerHTML=grupos.map(g=>`
       <p class="sub-label" style="margin-top:16px;position:sticky;top:0;background:#fff;padding:4px 0;">📅 ${g.etiqueta}</p>
       ${g.items.map(m=>`
-        <div class="mov-card mov-tipo-${m.tipo}${m.deReparacion?' mov-reparacion':''}">
+        <div class="mov-card mov-tipo-${m.tipo}${m.deReparacion?' mov-reparacion':''}${m.armado?' mov-armado':''}">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;">
             <div style="flex:1;">
-              <p style="font-size:14px;font-weight:700;color:#1b2a1b;">${m.equipoNombre}${m.deReparacion?' <span style="font-size:10.5px;font-weight:700;color:#6a1b9a;background:#f3e5f5;padding:1px 6px;border-radius:4px;vertical-align:middle;">REPARACIÓN</span>':''}</p>
+              <p style="font-size:14px;font-weight:700;color:#1b2a1b;">${m.equipoNombre}${m.deReparacion?' <span style="font-size:10.5px;font-weight:700;color:#6a1b9a;background:#f3e5f5;padding:1px 6px;border-radius:4px;vertical-align:middle;">REPARACIÓN</span>':''}${m.armado?' <span style="font-size:10.5px;font-weight:700;color:#f57f17;background:#fff3c4;padding:1px 6px;border-radius:4px;vertical-align:middle;">ARMADO</span>':''}</p>
               <p style="font-size:12px;color:#777;margin-top:2px;">${formatHora(m.fecha)} · ${m.tipo==='traslado'?`${m.localizacionOrigen||''} → ${m.localizacionDestino||''}`:(m.localizacion||'')}</p>
               ${m.remision?`<p style="font-size:12px;color:#555;margin-top:2px;">📄 ${m.remision}${m.pedidoNombre?' – '+m.pedidoNombre:''}</p>`:''}
               ${m.observacion?`<p style="font-size:11px;color:#aaa;font-style:italic;margin-top:2px;">📝 ${m.observacion}</p>`:''}
+              ${m.armado?`<p style="font-size:11.5px;color:#f57f17;font-weight:600;cursor:pointer;margin-top:6px;" onclick="toggleMovArmado('${m.id}')">${movArmadoAbierto.has(m.id)?'▾ Ocultar piezas usadas':`▸ Ver piezas usadas (${(m.piezasArmado||[]).length})`}</p>
+              ${movArmadoAbierto.has(m.id)?`<div style="margin-top:2px;">${(m.piezasArmado||[]).length>0?(m.piezasArmado||[]).map(pz=>`<p style="font-size:11px;color:#777;margin:2px 0;">🔧 ${pz.equipoNombre} × ${pz.cantidad}${pz.unidadSerial?` <span style="color:#bbb;">(${pz.unidadSerial})</span>`:''}${pz.nota?' — '+pz.nota:''}</p>`).join(''):'<p style="font-size:11px;color:#bbb;">Sin piezas registradas para esta unidad</p>'}</div>`:''}`:''}
             </div>
             <div style="text-align:right;">
-              <span style="font-size:18px;font-weight:900;color:${m.deReparacion?'#6a1b9a':(m.tipo==='traslado'?'#1565c0':(m.tipo==='entrada'?'#2e7d32':'#c62828'))};">${m.deReparacion?'':(m.tipo==='traslado'?`🔀${m.cantidad}`:`${m.tipo==='entrada'?'+':'-'}${m.cantidad}`)}</span>
-              <br/><span style="font-size:11px;color:${m.deReparacion?'#6a1b9a':(m.tipo==='traslado'?'#1565c0':'#aaa')};">${m.tipo==='traslado'?'TRASLADO':(m.tipo==='entrada'?'ENTRADA':'SALIDA')}</span>
-              ${(m.tipo==='entrada'&&!m.noEditable)?`<br/><button class="btn-sm" style="background:none;color:#1b2a1b;padding:2px 6px;margin-top:4px;" onclick="editarMovimiento('${m.id}')">✏️</button><button class="btn-sm" style="background:none;color:#c62828;padding:2px 6px;margin-top:4px;" onclick="eliminarMovimiento('${m.id}')">🗑️</button>`:''}
+              <span style="font-size:18px;font-weight:900;color:${m.armado?'#f57f17':(m.deReparacion?'#6a1b9a':(m.tipo==='traslado'?'#1565c0':(m.tipo==='entrada'?'#2e7d32':'#c62828')))};">${m.deReparacion?'':(m.tipo==='traslado'?`🔀${m.cantidad}`:`${m.tipo==='entrada'?'+':'-'}${m.cantidad}`)}</span>
+              <br/><span style="font-size:11px;color:${m.armado?'#f57f17':(m.deReparacion?'#6a1b9a':(m.tipo==='traslado'?'#1565c0':'#aaa'))};">${m.armado?'ARMADO':(m.tipo==='traslado'?'TRASLADO':(m.tipo==='entrada'?'ENTRADA':'SALIDA'))}</span>
+              ${(m.tipo==='entrada'&&!m.noEditable&&movDentroDeVentanaEdicion(m))?`<br/><button class="btn-sm" style="background:none;color:#1b2a1b;padding:2px 6px;margin-top:4px;" onclick="editarMovimiento('${m.id}')">✏️</button><button class="btn-sm" style="background:none;color:#c62828;padding:2px 6px;margin-top:4px;" onclick="eliminarMovimiento('${m.id}')">🗑️</button>`:''}
               ${(m.tipo==='salida'&&m.pedidoId)?`<br/><button class="btn-sm" style="background:none;color:#1565c0;padding:2px 6px;margin-top:4px;" onclick="document.getElementById('modalOverlay').classList.add('hidden');switchTab('pedidos');setTimeout(()=>abrirPedido('${m.pedidoId}'),50);">📋 Ver pedido</button>`:''}
             </div>
           </div>
@@ -11538,9 +11668,30 @@
         document.getElementById('catTipo').value=t.nombre;
         closeAllAutocomplete();
         actualizarVisibilidadCatCompuesto();
+        actualizarCatUsaSerialSegunTipo();
       }
     })), 'Sin tipos que coincidan. Agrégalo arriba en Tipos de equipo');
     actualizarVisibilidadCatCompuesto();
+    actualizarCatUsaSerialSegunTipo();
+  }
+
+  // Si el tipo elegido es Motor o Reductor, el equipo SIEMPRE maneja serial individual: se marca
+  // y se bloquea el checkbox para que no se pueda desmarcar por error. Para cualquier otro tipo
+  // queda libre para que el usuario decida.
+  window.actualizarCatUsaSerialSegunTipo=function(){
+    const tipoTxt=document.getElementById('catTipo')?.value.trim().toLowerCase()||'';
+    const tipoObj=tipos.find(t=>t.nombre.toLowerCase()===tipoTxt);
+    const chk=document.getElementById('catUsaSerial');
+    const nota=document.getElementById('catUsaSerialNota');
+    if(!chk) return;
+    if(tipoObj&&tipoTieneSerialFijo(tipoObj.valor)){
+      chk.checked=true;
+      chk.disabled=true;
+      if(nota) nota.textContent='(obligatorio para Motor/Reductor, siempre manejan serial individual)';
+    } else {
+      chk.disabled=false;
+      if(nota) nota.textContent='(si maneja serial individual, como motor/reductor/motoreductor)';
+    }
   }
 
   // Muestra/oculta el bloque "¿Compuesto?" según si el tipo escrito es Acople.
@@ -11692,6 +11843,7 @@
     document.getElementById('catPeso').value='';
     document.getElementById('catObs').value='';
     document.getElementById('catUsaSerial').checked=false;
+    actualizarCatUsaSerialSegunTipo();
   }
 
   window.onInputBuscarCatalogo=function(){
