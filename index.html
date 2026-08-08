@@ -7258,10 +7258,11 @@
           <button type="button" class="btn-sm" style="background:#1b2a1b;color:#fff;width:28px;height:28px;padding:0;border-radius:50%;font-size:16px;line-height:1;font-weight:700;flex-shrink:0;" onclick="event.stopPropagation();toggleAddEquipoPedido()">${pedidoAddSectionAbierta?'−':'+'}</button>
         </div>
         <div id="pedidoAddSectionBody" style="display:${pedidoAddSectionAbierta?'block':'none'};">
-        <select id="pedidoAddTipo" onchange="onCambioTipoAgregarPedido()" style="margin-bottom:8px;">
-          <option value="">— Tipo —</option>
-          ${tipos.map(t=>`<option value="${t.valor}" ${pedidoAddTipoVal===t.valor?'selected':''}>${t.emoji||''} ${t.nombre}</option>`).join('')}
-        </select>
+        <div class="autocomplete-wrap" style="margin-bottom:8px;">
+          <input type="text" id="pedidoAddTipoTexto" placeholder="Escribe o elige el tipo..." autocomplete="off" value="${tipos.find(t=>t.valor===pedidoAddTipoVal)?.nombre||''}" oninput="onInputPedidoAddTipo()" onfocus="onInputPedidoAddTipo()" onblur="onBlurPedidoAddTipo()" />
+          <div class="autocomplete-list" id="pedidoAddTipoList"></div>
+        </div>
+        <input type="hidden" id="pedidoAddTipo" value="${pedidoAddTipoVal}" />
         <div id="pedidoAddEquipoNormal" style="display:${pedidoAddTipoVal==='motoreductor'?'none':'block'};">
           <div class="autocomplete-wrap">
             <input type="text" id="pedidoAddEquipo" placeholder="Escribe el nombre del equipo..." autocomplete="off" value="${pedidoAddEquipoTexto}" oninput="onInputPedidoAddEquipo()" onfocus="onInputPedidoAddEquipo()" style="margin-bottom:8px;" />
@@ -7698,6 +7699,40 @@
   window.cambiarTabPedido=function(tab){
     pedidoModalTab=tab;
     renderModalPedido();
+  }
+
+  window.onInputPedidoAddTipo=function(){
+    const q=document.getElementById('pedidoAddTipoTexto').value.trim().toLowerCase();
+    const opciones=tipos.filter(t=>!q||t.nombre.toLowerCase().includes(q));
+    renderAutocompleteList(document.getElementById('pedidoAddTipoList'), opciones.map(t=>({
+      label:`${t.emoji||''} ${t.nombre}`,
+      onClick:()=>seleccionarPedidoAddTipo(t.valor,t.nombre)
+    })), 'Sin tipos que coincidan. Agrégalo en ⚙️ Config → Tipos de equipo');
+  }
+
+  window.seleccionarPedidoAddTipo=function(valor,nombre){
+    document.getElementById('pedidoAddTipoTexto').value=nombre;
+    document.getElementById('pedidoAddTipo').value=valor;
+    closeAllAutocomplete();
+    onCambioTipoAgregarPedido();
+  }
+
+  // Si el usuario escribió el nombre exacto de un tipo y salió del campo sin hacer clic en la
+  // sugerencia, lo resuelve igual; si no coincide con ningún tipo, vuelve a mostrar el tipo
+  // que estaba seleccionado antes (el campo no admite tipos que no existan en el catálogo).
+  window.onBlurPedidoAddTipo=function(){
+    setTimeout(()=>{
+      const txt=document.getElementById('pedidoAddTipoTexto')?.value.trim().toLowerCase()||'';
+      const match=tipos.find(t=>t.nombre.toLowerCase()===txt);
+      if(match){
+        if(document.getElementById('pedidoAddTipo').value!==match.valor) seleccionarPedidoAddTipo(match.valor,match.nombre);
+      } else if(!txt){
+        document.getElementById('pedidoAddTipo').value='';
+      } else {
+        const actual=tipos.find(t=>t.valor===document.getElementById('pedidoAddTipo').value);
+        document.getElementById('pedidoAddTipoTexto').value=actual?.nombre||'';
+      }
+    },150);
   }
 
   window.onCambioTipoAgregarPedido=function(){
