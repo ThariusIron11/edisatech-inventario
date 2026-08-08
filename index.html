@@ -4597,6 +4597,7 @@
         ?`<input type="text" placeholder="Ubicación de envío" value="${u.locacion||''}" style="flex:1;min-width:140px;margin:0;" onchange="actualizarSerialUnidad('${pedidoId}',${i},${j},'locacion',this.value)" />
           <button class="btn-sm" style="background:#fce4ec;color:#c62828;padding:6px 10px;white-space:nowrap;" onclick="quitarLocacionUnidad('${pedidoId}',${i},${j})">✕</button>`
         :`<button class="btn-sm" style="background:#e3f2fd;color:#1565c0;white-space:nowrap;" onclick="agregarLocacionUnidad('${pedidoId}',${i},${j})">📍 Locación</button>`);
+      const fondoArmado=u.armado?'background:#fffde7;border-radius:6px;padding:4px 6px;':'';
       if(esMR){
         // En un ítem "🆕 NUEVO" de reparación que combina una pieza original (equipoId null,
         // aún no reemplazada) con la reemplazada (equipoId real), solo el lado real es editable;
@@ -4604,7 +4605,7 @@
         const motorFijo=(item.reemplazoDeReparacion||item.armadoDeReparacion)&&!item.motor?.equipoId;
         const reductorFijo=(item.reemplazoDeReparacion||item.armadoDeReparacion)&&!item.reductor?.equipoId;
         if(soloLectura){
-          return `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
+          return `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap;${fondoArmado}">
             <span style="font-size:12px;color:#777;width:70px;flex-shrink:0;">Unidad ${j+1}</span>
             <span style="flex:1;font-size:13px;">Motor: ${u.motorSerial||'<span style="color:#bbb;">sin serial</span>'}</span>
             <span style="flex:1;font-size:13px;">Reductor: ${u.reductorSerial||'<span style="color:#bbb;">sin serial</span>'}${tagDevuelto}</span>
@@ -4617,7 +4618,7 @@
         const reductorCampo=reductorFijo
           ?`<span style="flex:1;font-size:13px;">Reductor: ${u.reductorSerial||'<span style="color:#bbb;">sin serial</span>'} <span style="color:#aaa;">(original)</span></span>`
           :`<input type="text" placeholder="Serial reductor" value="${u.reductorSerial||''}" style="flex:1;min-width:120px;margin:0;" onchange="actualizarSerialUnidad('${pedidoId}',${i},${j},'reductorSerial',this.value)" />`;
-        return `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
+        return `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap;${fondoArmado}">
           <span style="font-size:12px;color:#777;width:70px;flex-shrink:0;">Unidad ${j+1}</span>
           ${motorCampo}
           ${reductorCampo}
@@ -4625,13 +4626,13 @@
         </div>${htmlPiezasUsadas(u,i,j,soloLecturaPiezas,pedidoId,esItemReparacion)}`;
       }
       if(soloLectura){
-        return `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
+        return `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap;${fondoArmado}">
           <span style="font-size:12px;color:#777;width:70px;flex-shrink:0;">Unidad ${j+1}</span>
           <span style="flex:1;font-size:13px;">${u.serial||'<span style="color:#bbb;">sin serial</span>'}${tagDevuelto}</span>
           ${locacionSoloLectura}
         </div>${htmlPiezasUsadas(u,i,j,soloLecturaPiezas,pedidoId,esItemReparacion)}`;
       }
-      return `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
+      return `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap;${fondoArmado}">
         <span style="font-size:12px;color:#777;width:70px;flex-shrink:0;">Unidad ${j+1}</span>
         <input type="text" placeholder="Número de serie (si se conoce)" value="${u.serial||''}" style="flex:1;min-width:140px;margin:0;" onchange="actualizarSerialUnidad('${pedidoId}',${i},${j},'serial',this.value)" />
         ${locacionEditable}
@@ -4795,10 +4796,47 @@
       const chk=checks.find(c=>parseInt(c.dataset.idx)===j);
       return {...u, armado:!!chk?.checked};
     });
-    const itemsNuevos=p.items.map((it,i)=>i===itemIndex?{...it,unidades:nuevasUnidades}:it);
+
+    // Una unidad marcada "armado" no sale del reductor ya terminado del catálogo — se construye
+    // con piezas sueltas (registradas aparte con "Agregar pieza para armar esta unidad", que sí
+    // descuentan su propio stock). Por eso, al marcarla, se libera al inventario general la
+    // reserva de reductor que tenía esta unidad — sin tocar el conteo de "cubierto" del ítem,
+    // porque para el pedido esa unidad sigue estando cubierta (solo que por armado, no por stock).
+    // armadoLiberado lleva la cuenta de cuántas unidades de este ítem tienen esa reserva liberada,
+    // para poder re-tomar exactamente esa cantidad del stock si luego se desmarcan.
+    const esMR=item.equipoTipo==='motoreductor';
+    const equipoId=esMR?(item.reductor?.equipoId||null):(item.equipoId||null);
+    const cub=esMR?(item.reductor?.cubierto||0):(item.cubierto||0);
+    let armadoLiberado=item.armadoLiberado||0;
+    let sinStockParaRecubrir=false;
+
+    if(equipoId){
+      for(let j=0;j<item.unidades.length;j++){
+        const eraArmado=!!item.unidades[j].armado;
+        const esArmado=!!nuevasUnidades[j].armado;
+        if(!eraArmado&&esArmado){
+          if(armadoLiberado<cub){
+            await updateDoc(doc(db,'inv_equipos',equipoId),{disponible:increment(1),reservado:increment(-1)});
+            armadoLiberado++;
+          }
+        } else if(eraArmado&&!esArmado){
+          if(armadoLiberado>0){
+            const eq=equipos.find(e=>e.id===equipoId);
+            if((eq?.disponible||0)>0){
+              await updateDoc(doc(db,'inv_equipos',equipoId),{disponible:increment(-1),reservado:increment(1)});
+              armadoLiberado--;
+            } else {
+              sinStockParaRecubrir=true;
+            }
+          }
+        }
+      }
+    }
+
+    const itemsNuevos=p.items.map((it,i)=>i===itemIndex?{...it,unidades:nuevasUnidades,armadoLiberado}:it);
     await updateDoc(doc(db,'inv_pedidos',pedidoId),{items:itemsNuevos});
     if(pedidoActual&&pedidoActual.id===pedidoId) pedidoActual.items=itemsNuevos;
-    toast('✓ Unidades armadas actualizadas');
+    toast(sinStockParaRecubrir?'✓ Actualizado — algunas unidades desmarcadas no tenían stock real para re-cubrirlas':'✓ Unidades armadas actualizadas');
     document.getElementById('modalOverlay').classList.add('hidden');
     renderModalPedido();
   }
@@ -7077,7 +7115,8 @@
             // se muestra completa (junto con la del nuevo, si tiene una distinta) en la tarjeta
             // "🆕 NUEVO" correspondiente.
             const ocGenerica=(item.ordenCompra&&!tieneReemplazo)?`<br/><span style="font-size:14px;color:#777;">🧾 OC: ${item.ordenCompra}</span>`:'';
-            return `<tr>
+            const tieneArmadoMR=(item.unidades||[]).some(u=>u.armado);
+            return `<tr${tieneArmadoMR?' style="background:#fffde7;"':''}>
               <td class="equipo-col"><strong>${itemTieneDevolucion(item)?'↩️ ':''}<span style="${itemTieneDevolucion(item)?'color:#1565c0;':''}">🧩 Motoreductor</span></strong>${itemTieneDevolucion(item)?`<span style="font-size:11px;color:#1565c0;font-weight:700;"> (${cantidadDevueltaDeItem(item)} devuelta${cantidadDevueltaDeItem(item)===1?'':'s'})</span>`:''}<br/>
                 <span style="font-size:15px;">⚡ ${motorAsignado?`${item.motor.equipoNombre} X ${item.cantidad} und`:'<span style="color:#e65100;">Motor sin asignar</span>'}</span><br/>
                 <span style="font-size:15px;">⚙️ ${reductorAsignado?`${item.reductor.equipoNombre} X ${item.cantidad} und`:'<span style="color:#e65100;">Reductor sin asignar</span>'}</span>
@@ -7156,7 +7195,8 @@
                 ?`<br/><span style="font-size:14px;color:#777;">🧾 OC original: ${ocOriginalHeredada}</span><br/><span style="font-size:14px;color:#777;">🧾 OC nuevo: ${ocPropiaLone}</span>`
                 :((ocPropiaLone||ocOriginalHeredada)?`<br/><span style="font-size:14px;color:#777;">🧾 OC: ${ocPropiaLone||ocOriginalHeredada}</span>`:''))
             :(ocOriginalLone?`<br/><span style="font-size:14px;color:#777;">🧾 OC: ${ocOriginalLone}</span>`:(item.deReparacion?'':(item.ordenCompra?`<br/><span style="font-size:14px;color:#777;">🧾 OC: ${item.ordenCompra}</span>`:'')));
-          return `<tr>
+          const tieneArmadoLone=(item.unidades||[]).some(u=>u.armado);
+          return `<tr${tieneArmadoLone?' style="background:#fffde7;"':''}>
             <td class="equipo-col"><strong>${item.reemplazoDeReparacion?'<span style="color:#6a1b9a;">🆕 NUEVO · </span>':''}${item.compuesto?'🔗 ':''}${itemTieneDevolucion(item)?'↩️ ':''}<span style="${itemTieneDevolucion(item)?'color:#1565c0;':''}">${item.equipoNombre}</span></strong>${itemTieneDevolucion(item)?`<span style="font-size:11px;color:#1565c0;font-weight:700;"> (${cantidadDevueltaDeItem(item)} devuelta${cantidadDevueltaDeItem(item)===1?'':'s'})</span>`:''}<br/>${item.compuesto
                 ?(item.partes||[]).map(p=>{
                     const necesario=(p.cantidad||0)*(item.cantidad||1);
