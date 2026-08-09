@@ -1032,23 +1032,41 @@
     });
   }
 
-  // ── RECONEXIÓN AL VOLVER EN PRIMER PLANO ──
+  // ── RECONEXIÓN DEL CANAL EN TIEMPO REAL DE FIRESTORE ──
   // En celulares, cuando la PWA pasa a segundo plano (pantalla bloqueada, cambio de app, etc.)
   // el sistema suele cortar la conexión en tiempo real de Firestore, y el SDK no siempre la
   // reconecta solo al volver — los cambios quedan "congelados" hasta recargar (F5). Forzamos
-  // un ciclo de red (apagar/prender) cada vez que la app vuelve a estar visible, para que
-  // Firestore reabra el canal y todos los onSnapshot activos se refresquen con datos frescos.
+  // un ciclo de red (apagar/prender) para que Firestore reabra el canal y todos los onSnapshot
+  // activos se refresquen con datos frescos.
+  //
+  // reconectando: evita que varios de estos ciclos se disparen encimados (p.ej. visibilitychange
+  // y focus casi al mismo tiempo al volver a la pestaña), lo que podía dejar llamadas de
+  // enableNetwork/disableNetwork cruzadas entre sí.
+  let reconectando=false;
+  async function reconectarFirestore(){
+    if(reconectando) return;
+    reconectando=true;
+    try{ await disableNetwork(db); await enableNetwork(db); }
+    catch(e){}
+    finally{ reconectando=false; }
+  }
   document.addEventListener('visibilitychange', () => {
-    if(document.visibilityState==='visible'){
-      disableNetwork(db).then(()=>enableNetwork(db)).catch(()=>{});
-    }
+    if(document.visibilityState==='visible') reconectarFirestore();
   });
-  window.addEventListener('focus', () => {
-    disableNetwork(db).then(()=>enableNetwork(db)).catch(()=>{});
-  });
+  window.addEventListener('focus', reconectarFirestore);
   window.addEventListener('online', () => {
     enableNetwork(db).catch(()=>{});
   });
+  // Restaurar desde el bfcache (volver con el botón "atrás" del navegador) tampoco siempre
+  // dispara visibilitychange/focus de forma confiable — se cubre aparte.
+  window.addEventListener('pageshow', (e)=>{ if(e.persisted) reconectarFirestore(); });
+  // HEARTBEAT: el caso más importante y el que describías — en muchas redes (routers/firewalls
+  // de oficina) el canal de Firestore se congela en silencio AUNQUE la pestaña siga visible y
+  // con foco todo el tiempo (p.ej. por corte de conexiones inactivas de la red). Ahí nunca se
+  // dispara visibilitychange ni focus, así que sin esto la app se queda "viendo" datos viejos
+  // indefinidamente aunque Firestore ya tenga los cambios. Forzamos un ciclo de reconexión cada
+  // pocos minutos como respaldo, sin depender de ningún evento del navegador.
+  setInterval(()=>{ if(document.visibilityState==='visible') reconectarFirestore(); }, 3*60*1000);
 
   // ── LOGIN OBLIGATORIO ──
   // Nada de lo que sigue en este archivo (listeners de Firestore, funciones, etc.) se
@@ -2947,6 +2965,24 @@
     renderPedidos(); renderPendientesAsignar();
     if(fichaEnvioIds) renderFichaEnvio();
     renderEstadoEnvios();
+    // Si hay una pestaña de pedido abierta (no un borrador nuevo sin guardar), refrescar
+    // pedidoActual con los datos recién sincronizados y re-renderizar el modal — si no, un
+    // cambio hecho desde otro dispositivo/pestaña (o por otra acción en esta misma sesión)
+    // se guarda bien en la base de datos pero la ficha abierta se queda mostrando lo viejo
+    // hasta cerrar y volver a abrir el pedido.
+    const tabActiva=pedidoTabs.find(t=>t.key===pedidoTabActivaKey);
+    if(tabActiva&&!tabActiva.esNuevo&&pedidoActual){
+      const actualizado=pedidos.find(x=>x.id===tabActiva.pedidoId);
+      if(actualizado){
+        pedidoActual={...actualizado};
+        tabActiva.label=tituloPedido(actualizado);
+        if(!document.getElementById('modalPedido').classList.contains('hidden')) renderModalPedido();
+        renderPedidoTabsStrip();
+      } else {
+        // El pedido ya no existe (lo canceló/eliminó otra sesión mientras lo tenías abierto).
+        cerrarPedidoTab(tabActiva.key);
+      }
+    }
     if(reparacionEditandoId && !document.getElementById('modalReparacion').classList.contains('hidden')) renderModalReparacion();
     if(typeof renderReparaciones==='function') renderReparaciones();
     if(typeof renderPedidoTabsStrip==='function') renderPedidoTabsStrip();
@@ -5416,6 +5452,7 @@
       const eje_solido=item.tieneEjeSolido&&item.eje_solido?{...item.eje_solido,cubierto:(item.eje_solido.cubierto||0)-excesoEjeSolido}:item.eje_solido;
       const unidades=unidadesForzadas?unidadesForzadas:(item.unidades?ajustarUnidades(item.unidades,nueva,true):item.unidades);
       const updItems=p.items.map((it,i)=>i===itemIndex?{...it,cantidad:nueva,motor,reductor,armadoLiberado,...(it.tieneBrazo?{brazo}:{}),...(it.tieneEjeSolido?{eje_solido}:{}),...(unidades?{unidades}:{})}:it);
+      p.items=updItems;
       await updateDoc(doc(db,'inv_pedidos',pedidoId),{items:updItems});
       if(pedidoActual.id===pedidoId){pedidoActual.items=updItems;renderModalPedido();}
       toast('✓ Cantidad actualizada');
@@ -5443,6 +5480,7 @@
       }
       const partesNuevas=excesos.map(({pz,exceso})=>({...pz,cubierto:(pz.cubierto||0)-exceso}));
       const updItems=p.items.map((it,i)=>i===itemIndex?{...it,cantidad:nueva,partes:partesNuevas}:it);
+      p.items=updItems;
       await updateDoc(doc(db,'inv_pedidos',pedidoId),{items:updItems});
       if(pedidoActual.id===pedidoId){pedidoActual.items=updItems;renderModalPedido();}
       toast('✓ Cantidad actualizada');
@@ -5479,6 +5517,7 @@
       const unidades=unidadesForzadas?unidadesForzadas:(it.unidades?ajustarUnidades(it.unidades,nueva,false):it.unidades);
       return {...it,cantidad:nueva,cubierto:cubNuevo,armadoLiberado,...(unidades?{unidades}:{})};
     });
+    p.items=updItems;
     await updateDoc(doc(db,'inv_pedidos',pedidoId),{items:updItems});
     if(pedidoActual.id===pedidoId){
       pedidoActual.items=updItems;
