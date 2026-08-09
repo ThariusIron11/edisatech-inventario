@@ -2947,24 +2947,6 @@
     renderPedidos(); renderPendientesAsignar();
     if(fichaEnvioIds) renderFichaEnvio();
     renderEstadoEnvios();
-    // Si hay una pestaña de pedido abierta (no un borrador nuevo sin guardar), refrescar
-    // pedidoActual con los datos recién sincronizados y re-renderizar el modal — si no, un
-    // cambio hecho desde otro dispositivo/pestaña (o por otra acción en esta misma sesión)
-    // se guarda bien en la base de datos pero la ficha abierta se queda mostrando lo viejo
-    // hasta cerrar y volver a abrir el pedido.
-    const tabActiva=pedidoTabs.find(t=>t.key===pedidoTabActivaKey);
-    if(tabActiva&&!tabActiva.esNuevo&&pedidoActual){
-      const actualizado=pedidos.find(x=>x.id===tabActiva.pedidoId);
-      if(actualizado){
-        pedidoActual={...actualizado};
-        tabActiva.label=tituloPedido(actualizado);
-        if(!document.getElementById('modalPedido').classList.contains('hidden')) renderModalPedido();
-        renderPedidoTabsStrip();
-      } else {
-        // El pedido ya no existe (lo canceló/eliminó otra sesión mientras lo tenías abierto).
-        cerrarPedidoTab(tabActiva.key);
-      }
-    }
     if(reparacionEditandoId && !document.getElementById('modalReparacion').classList.contains('hidden')) renderModalReparacion();
     if(typeof renderReparaciones==='function') renderReparaciones();
     if(typeof renderPedidoTabsStrip==='function') renderPedidoTabsStrip();
