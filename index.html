@@ -1039,26 +1039,38 @@
   // un ciclo de red (apagar/prender) para que Firestore reabra el canal y todos los onSnapshot
   // activos se refresquen con datos frescos.
   //
-  // reconectando: evita que varios de estos ciclos se disparen encimados (p.ej. visibilitychange
-  // y focus casi al mismo tiempo al volver a la pestaña), lo que podía dejar llamadas de
-  // enableNetwork/disableNetwork cruzadas entre sí.
+  // reconectando: evita que varios de estos ciclos se disparen encimados.
+  // ultimoReconecte: no dejamos que se dispare más de un ciclo cada pocos segundos — un
+  // diálogo confirm()/prompt() (p.ej. al asignar equipos) hace que la ventana pierda y
+  // recupere el foco solo, y si eso dispara un apagar/prender de red justo mientras se está
+  // enviando una escritura (como el increment() de "reservado"), Firestore puede reenviarla
+  // y el increment queda aplicado dos veces. Por eso 'focus' ya NO dispara la reconexión por
+  // sí solo: solo se usa como respaldo cuando la pestaña estuvo realmente oculta.
   let reconectando=false;
+  let ultimoReconecte=0;
   async function reconectarFirestore(){
-    if(reconectando) return;
+    const ahora=Date.now();
+    if(reconectando||(ahora-ultimoReconecte)<15000) return;
     reconectando=true;
+    ultimoReconecte=ahora;
     try{ await disableNetwork(db); await enableNetwork(db); }
     catch(e){}
     finally{ reconectando=false; }
   }
+  let pestanaEstuvoOculta=false;
   document.addEventListener('visibilitychange', () => {
-    if(document.visibilityState==='visible') reconectarFirestore();
+    if(document.visibilityState==='visible'&&pestanaEstuvoOculta){
+      pestanaEstuvoOculta=false;
+      reconectarFirestore();
+    } else if(document.visibilityState==='hidden'){
+      pestanaEstuvoOculta=true;
+    }
   });
-  window.addEventListener('focus', reconectarFirestore);
   window.addEventListener('online', () => {
     enableNetwork(db).catch(()=>{});
   });
   // Restaurar desde el bfcache (volver con el botón "atrás" del navegador) tampoco siempre
-  // dispara visibilitychange/focus de forma confiable — se cubre aparte.
+  // dispara visibilitychange de forma confiable — se cubre aparte.
   window.addEventListener('pageshow', (e)=>{ if(e.persisted) reconectarFirestore(); });
   // HEARTBEAT: el caso más importante y el que describías — en muchas redes (routers/firewalls
   // de oficina) el canal de Firestore se congela en silencio AUNQUE la pestaña siga visible y
