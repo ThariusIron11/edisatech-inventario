@@ -3337,15 +3337,30 @@
     }
 
     const buscandoOFiltrando=!!busq||invFiltroTipos.length>0;
+    // Detecta grupos "huérfanos": equipos cuyo campo localizacion (texto guardado en el equipo)
+    // no coincide EXACTO con ninguna localización real de la lista actual (por may/min,
+    // espacios de más, o porque la localización se editó y a este equipo no le llegó el cambio).
+    // Si se parece a una localización real (comparando sin espacios extra ni mayúsculas), se
+    // ofrece un botón para unificarlo con un clic, en vez de que aparezca como una ubicación
+    // aparte con el mismo nombre a simple vista.
+    const normLoc=s=>(s||'').trim().toLowerCase().replace(/\s+/g,' ');
+    const etiquetasValidas=new Set(localizaciones.map(l=>etiquetaLoc(l)));
+    function matchHuerfano(loc){
+      if(etiquetasValidas.has(loc)) return null;
+      const candidatos=localizaciones.filter(l=>normLoc(etiquetaLoc(l))===normLoc(loc));
+      return candidatos.length===1?etiquetaLoc(candidatos[0]):null;
+    }
     Object.entries(grupos).sort(([a],[b])=>a.localeCompare(b)).forEach(([loc,eqs])=>{
       if(eqs.length===0) return;
       const dispTotal=eqs.reduce((s,e)=>s+(e.disponible||0),0);
       const resTotal=eqs.reduce((s,e)=>s+Math.max(0,e.reservado||0),0);
       const abierto=buscandoOFiltrando?true:invLocAbiertas.has(loc);
+      const destinoUnificar=matchHuerfano(loc);
       html+=`<div class="loc-header" style="cursor:pointer;" onclick="toggleLoc('${loc}')">
         <span class="loc-letra">📍</span>
-        <span>${loc}</span>
+        <span>${loc}${destinoUnificar?' <span style="font-size:11px;color:#e65100;font-weight:700;">⚠️ duplicada</span>':''}</span>
         <span class="loc-count">${eqs.length} equipo${eqs.length!==1?'s':''} · ${dispTotal} disp · ${resTotal} res &nbsp;${abierto?'▲':'▼'}</span>
+        ${destinoUnificar?`<button class="btn-sm" style="background:#fff3e0;color:#e65100;white-space:nowrap;" onclick="event.stopPropagation();unificarUbicacionHuerfana('${loc.replace(/'/g,"\\'")}','${destinoUnificar.replace(/'/g,"\\'")}')">🔧 Unificar con "${destinoUnificar}"</button>`:''}
       </div>
       ${abierto?`<div class="loc-body">
         ${eqs.map(tarjetaEquipoInventario).join('')}
@@ -3381,6 +3396,21 @@
     if(invLocAbiertas.has(loc)) invLocAbiertas.delete(loc);
     else invLocAbiertas.add(loc);
     renderInventario();
+  }
+
+  // Reasigna todos los equipos de una ubicación "huérfana" (texto guardado que ya no coincide
+  // exacto con ninguna localización real) a la localización real correcta, para que dejen de
+  // aparecer como una ubicación aparte y se unan al grupo verdadero.
+  window.unificarUbicacionHuerfana=async function(loc,destino){
+    const afectados=equipos.filter(e=>e.localizacion===loc);
+    if(afectados.length===0){toast('No hay equipos en esa ubicación',true);return;}
+    if(!confirm(`¿Unificar ${afectados.length} equipo${afectados.length!==1?'s':''} de "${loc}" con la ubicación real "${destino}"?`)) return;
+    for(const eq of afectados){
+      await updateDoc(doc(db,'inv_equipos',eq.id),{localizacion:destino});
+      eq.localizacion=destino;
+    }
+    renderInventario();
+    toast('✓ Ubicaciones unificadas');
   }
 
   let editPartesTemp=[]; // piezas del acople compuesto que se está editando
