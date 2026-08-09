@@ -122,7 +122,6 @@
 
     @media(min-width:1300px){
       .layout{grid-template-columns:240px 1fr;}
-      #panel-inventario.active{grid-template-columns:1fr 1fr 1fr;}
       #panel-movimientos.active{grid-template-columns:1fr 1fr;}
       #panel-radar.active{grid-template-columns:1fr 1fr 1fr;}
     }
@@ -310,9 +309,11 @@
     .qty-val{font-size:15px;font-weight:700;min-width:24px;text-align:center;}
     .sidebar-logo{display:none;}
     .desktop-only{display:none;}
+    .mobile-only-tab{}
     @media(min-width:900px){
       .sidebar-logo{display:block;}
       .desktop-only{display:block;}
+      .mobile-only-tab{display:none;}
       .modal-overlay{align-items:center;padding:24px;}
       .modal-box{border-radius:20px;max-height:85vh;}
       #modalPedido{justify-content:flex-end;}
@@ -371,6 +372,7 @@
 <nav class="tabs" id="tabBar">
   <span class="sidebar-logo">📦 Inventario</span>
   <button class="tab-btn active" onclick="switchTab('inventario')">📦 Inventario</button>
+  <button class="tab-btn mobile-only-tab" onclick="switchTab('resumen')">📊 Resumen</button>
   <button class="tab-btn" onclick="switchTab('pedidos')">📋 Pedidos</button>
   <button class="tab-btn" onclick="switchTab('reparaciones')">🔧 Reparaciones</button>
   <button class="tab-btn" onclick="switchTab('entrada-salida')">🧾 Registrar Movimiento</button>
@@ -406,6 +408,15 @@
     <p class="app-title">📊 Resumen</p>
     <p class="app-sub">Totales del inventario</p>
     <div id="invResumenContenido"><p class="loading">Cargando...</p></div>
+  </div>
+</div>
+
+<!-- ══════════ RESUMEN (pestaña propia en móvil; en escritorio se ve junto a Inventario) ══════════ -->
+<div class="panel" id="panel-resumen">
+  <div class="app-frame">
+    <p class="app-title">📊 Resumen</p>
+    <p class="app-sub">Totales del inventario</p>
+    <div id="invResumenContenidoMobile"><p class="loading">Cargando...</p></div>
   </div>
 </div>
 
@@ -1396,7 +1407,7 @@
   window.toast=toast;
 
   // ── TABS ──
-  const TABS=['inventario','pedidos','reparaciones','entrada-salida','movimientos','radar','config'];
+  const TABS=['inventario','resumen','pedidos','reparaciones','entrada-salida','movimientos','radar','config'];
   window.switchTab=function(tab){
     TABS.forEach(t=>{
       const p=document.getElementById('panel-'+t);
@@ -1411,7 +1422,7 @@
       const p=document.getElementById('panel-'+t);
       if(p) p.classList.toggle('active', t===tab);
     });
-    const idx={inventario:0,pedidos:1,reparaciones:2,'entrada-salida':3,movimientos:4,radar:5,config:6};
+    const idx={inventario:0,resumen:1,pedidos:2,reparaciones:3,'entrada-salida':4,movimientos:5,radar:6,config:7};
     document.querySelectorAll('.tab-btn')[idx[tab]]?.classList.add('active');
   }
 
@@ -3115,23 +3126,23 @@
     renderTecnicos();
   });
 
-  // ── RESUMEN INVENTARIO (desktop col 2) ──
+  // ── RESUMEN INVENTARIO (columna 2 en escritorio, pestaña propia en móvil) ──
   function renderResumen(){
-    const cont=document.getElementById('invResumenContenido');
-    if(!cont) return;
+    const conts=[document.getElementById('invResumenContenido'),document.getElementById('invResumenContenidoMobile')].filter(Boolean);
+    if(conts.length===0) return;
     const totalEquipos=equipos.length;
     const totalDisp=equipos.reduce((s,e)=>s+(e.disponible||0),0);
     const totalRes=equipos.reduce((s,e)=>s+Math.max(0,e.reservado||0),0);
     const cero=equipos.filter(e=>(e.disponible||0)===0).length;
     const porTipo={};
     equipos.forEach(e=>{ porTipo[e.tipo]=(porTipo[e.tipo]||0)+(e.disponible||0); });
-    cont.innerHTML=`
+    const html=`
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
         <div style="background:#e8f5e9;border-radius:12px;padding:14px;text-align:center;">
           <p style="font-size:26px;font-weight:900;color:#2e7d32;">${totalDisp}</p>
           <p style="font-size:11px;color:#555;font-weight:600;">DISPONIBLES</p>
         </div>
-        <div style="background:#fff8e1;border-radius:12px;padding:14px;text-align:center;">
+        <div style="background:#fff8e1;border-radius:12px;padding:14px;text-align:center;cursor:pointer;" onclick="abrirFichaReservados()">
           <p style="font-size:26px;font-weight:900;color:#e65100;">${totalRes}</p>
           <p style="font-size:11px;color:#555;font-weight:600;">RESERVADOS</p>
         </div>
@@ -3139,18 +3150,118 @@
           <p style="font-size:26px;font-weight:900;color:#1b2a1b;">${totalEquipos}</p>
           <p style="font-size:11px;color:#555;font-weight:600;">REFERENCIAS</p>
         </div>
-        <div style="background:#fce4ec;border-radius:12px;padding:14px;text-align:center;">
+        <div style="background:#fce4ec;border-radius:12px;padding:14px;text-align:center;cursor:pointer;" onclick="abrirFichaSinStock()">
           <p style="font-size:26px;font-weight:900;color:#c62828;">${cero}</p>
           <p style="font-size:11px;color:#555;font-weight:600;">SIN STOCK</p>
         </div>
       </div>
       <p class="sub-label">Por tipo</p>
       ${Object.entries(porTipo).map(([tipo,qty])=>`
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f0f0f0;">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f0f0f0;cursor:pointer;" onclick="abrirFichaTipo('${tipo}')">
           <span>${badgeHTML(tipo)}</span>
           <span style="font-weight:700;color:#1b2a1b;">${qty} uds</span>
         </div>`).join('')}
     `;
+    conts.forEach(c=>{ c.innerHTML=html; });
+  }
+
+  // Para la ficha de "Reservados": recorre todos los pedidos activos y calcula, por cada
+  // equipo, cuánto tiene reservado en CADA pedido puntual (la misma resta cubierto-despachado-
+  // armadoLiberado que usa cancelarPedidoInterno para saber qué liberar), agrupando por
+  // pedidoId por si un mismo equipo aparece en más de un ítem del mismo pedido.
+  function calcularReservasPorEquipo(){
+    const mapa={};
+    function add(equipoId,pedidoId,pedidoNombre,cantidad){
+      if(!equipoId||!(cantidad>0)) return;
+      if(!mapa[equipoId]) mapa[equipoId]=[];
+      const existente=mapa[equipoId].find(x=>x.pedidoId===pedidoId);
+      if(existente) existente.cantidad+=cantidad; else mapa[equipoId].push({pedidoId,pedidoNombre,cantidad});
+    }
+    pedidos.forEach(p=>{
+      (p.items||[]).forEach(item=>{
+        if(item.deReparacion) return; // equipo propio del cliente, nunca descontó stock del catálogo
+        if(item.equipoTipo==='motoreductor'){
+          add(item.motor?.equipoId,p.id,p.nombre,(item.motor?.cubierto||0)-(item.despachado||0));
+          add(item.reductor?.equipoId,p.id,p.nombre,Math.max(0,(item.reductor?.cubierto||0)-(item.despachado||0)-(item.armadoLiberado||0)));
+          if(item.tieneBrazo) add(item.brazo?.equipoId,p.id,p.nombre,(item.brazo?.cubierto||0)-(item.despachado||0));
+          if(item.tieneEjeSolido) add(item.eje_solido?.equipoId,p.id,p.nombre,(item.eje_solido?.cubierto||0)-(item.despachado||0));
+          return;
+        }
+        if(item.compuesto){
+          (item.partes||[]).forEach(pz=>{
+            const consumidoPorDespacho=(item.despachado||0)*(pz.cantidad||0);
+            add(pz.equipoId,p.id,p.nombre,(pz.cubierto||0)-consumidoPorDespacho);
+          });
+          return;
+        }
+        add(item.equipoId,p.id,p.nombre,Math.max(0,(item.cubierto||0)-(item.despachado||0)-(item.armadoLiberado||0)));
+      });
+    });
+    return mapa;
+  }
+
+  // Ficha "Reservados": qué equipos tienen stock reservado y en cuál(es) pedido(s), para poder
+  // saltar directo al pedido con un clic.
+  window.abrirFichaReservados=function(){
+    const mapa=calcularReservasPorEquipo();
+    const eqs=equipos.filter(e=>Math.max(0,e.reservado||0)>0)
+      .sort((a,b)=>(a.localizacion||'').localeCompare(b.localizacion||'')||a.nombre.localeCompare(b.nombre));
+    const resTotal=eqs.reduce((s,e)=>s+Math.max(0,e.reservado||0),0);
+    document.getElementById('modalTitulo').textContent='🟡 Reservados';
+    document.getElementById('modalSub').textContent=`${eqs.length} referencia${eqs.length!==1?'s':''} · ${resTotal} unidades reservadas`;
+    document.getElementById('modalContenido').innerHTML=eqs.length>0
+      ?eqs.map(eq=>{
+        const res=Math.max(0,eq.reservado||0);
+        const usos=mapa[eq.id]||[];
+        return `<div class="equipo-inv-card">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+            <div style="flex:1;">
+              <p class="equipo-inv-nombre">${eq.nombre}</p>
+              <div style="margin-top:4px;">${badgeHTML(eq.tipo)}<span class="badge-loc">${eq.localizacion}</span></div>
+            </div>
+            <span class="stock-chip stock-res">🟡 ${res} res</span>
+          </div>
+          ${usos.length>0?`<div style="margin-top:8px;padding-top:8px;border-top:1px solid #f0f0f0;">
+            ${usos.map(u=>`<p style="font-size:13px;color:#333;margin-bottom:2px;cursor:pointer;text-decoration:underline;" onclick="document.getElementById('modalOverlay').classList.add('hidden');switchTab('pedidos');setTimeout(()=>abrirPedido('${u.pedidoId}'),50);">📄 ${u.pedidoNombre} · ${u.cantidad} und</p>`).join('')}
+          </div>`:`<p style="font-size:12px;color:#aaa;margin-top:8px;">⚠️ No se encontró el pedido que lo reserva (dato desincronizado)</p>`}
+        </div>`;
+      }).join('')
+      :'<p class="empty-msg">No hay equipos reservados</p>';
+    document.querySelector('#modalOverlay .modal-box')?.classList.remove('modal-box-mitad');
+    document.getElementById('modalOverlay').classList.remove('hidden');
+  }
+
+  // Ficha "Sin stock": equipos con 0 disponibles, para revisarlos de un vistazo y poder abrir
+  // cada uno (misma tarjeta clickeable que en Inventario).
+  window.abrirFichaSinStock=function(){
+    const eqs=equipos.filter(e=>(e.disponible||0)===0)
+      .sort((a,b)=>(a.localizacion||'').localeCompare(b.localizacion||'')||a.nombre.localeCompare(b.nombre));
+    document.getElementById('modalTitulo').textContent='🔴 Sin stock';
+    document.getElementById('modalSub').textContent=`${eqs.length} referencia${eqs.length!==1?'s':''} con 0 disponibles`;
+    document.getElementById('modalContenido').innerHTML=eqs.length>0
+      ?eqs.map(eq=>tarjetaEquipoInventario(eq)).join('')
+      :'<p class="empty-msg">Todo tiene stock 🎉</p>';
+    document.querySelector('#modalOverlay .modal-box')?.classList.remove('modal-box-mitad');
+    document.getElementById('modalOverlay').classList.remove('hidden');
+  }
+
+  // Ficha de un tipo de equipo: se abre desde "Por tipo" en el Resumen del inventario y
+  // muestra, en el modal genérico, todos los equipos (no compuestos, ya que esos no tienen
+  // stock propio) de ese tipo con su localización, disponible y reservado — las mismas
+  // tarjetas que se ven en Inventario, para poder abrir cada una y editarla igual.
+  window.abrirFichaTipo=function(tipo){
+    const t=tipos.find(x=>x.valor===tipo);
+    const eqs=equipos.filter(e=>e.tipo===tipo&&!e.compuesto)
+      .sort((a,b)=>(a.localizacion||'').localeCompare(b.localizacion||'')||a.nombre.localeCompare(b.nombre));
+    const dispTotal=eqs.reduce((s,e)=>s+(e.disponible||0),0);
+    const resTotal=eqs.reduce((s,e)=>s+Math.max(0,e.reservado||0),0);
+    document.getElementById('modalTitulo').textContent=`${t?.emoji||''} ${t?.nombre||tipo}`;
+    document.getElementById('modalSub').textContent=`${eqs.length} referencia${eqs.length!==1?'s':''} · ${dispTotal} disp · ${resTotal} res`;
+    document.getElementById('modalContenido').innerHTML=eqs.length>0
+      ?eqs.map(eq=>tarjetaEquipoInventario(eq)).join('')
+      :'<p class="empty-msg">Sin equipos de este tipo</p>';
+    document.querySelector('#modalOverlay .modal-box')?.classList.remove('modal-box-mitad');
+    document.getElementById('modalOverlay').classList.remove('hidden');
   }
 
   // ── STATS MOVIMIENTOS (desktop col 2) ──
