@@ -3877,128 +3877,152 @@
     if(chev) chev.textContent=abierto?'▸':'▾';
   }
 
+  // asignacionesEnCurso: evita que la MISMA asignación (mismo pedido+ítem+equipo+parte) se
+  // dispare dos veces en paralelo — p.ej. un doble toque en móvil antes de que llegue la
+  // confirmación del primer clic, o dos clics muy seguidos antes de que la UI se re-renderice.
+  // Sin esto, el segundo clic vuelve a leer "pend"/"disponible" con los datos VIEJOS (porque
+  // el primer clic aún no terminó de guardar ni de refrescar 'equipos'/'pedidos'), pasa la
+  // validación igual, y termina duplicando el increment sobre "reservado" (p.ej. asignar 4
+  // pero que "reservado" suba 8).
+  const asignacionesEnCurso=new Set();
   window.asignarPendiente=async function(pedidoId,itemIndex,equipoId,parte){
-    const input=document.getElementById(`asignarInput-${equipoId}-${itemIndex}-${pedidoId}-${parte||'x'}`);
-    const monto=parseInt(input?.value)||0;
-    const p=pedidos.find(x=>x.id===pedidoId);
-    if(!p){toast('Pedido no encontrado',true);return;}
-    const item=(p.items||[])[itemIndex];
-    if(!item){toast('Ítem no encontrado',true);return;}
-    const eq=equipos.find(e=>e.id===equipoId);
-    if(!eq){toast('Equipo no encontrado',true);return;}
+    const claveOp=`${pedidoId}|${itemIndex}|${equipoId}|${parte||'x'}`;
+    if(asignacionesEnCurso.has(claveOp)) return;
+    asignacionesEnCurso.add(claveOp);
+    try{
+      const input=document.getElementById(`asignarInput-${equipoId}-${itemIndex}-${pedidoId}-${parte||'x'}`);
+      const monto=parseInt(input?.value)||0;
+      const p=pedidos.find(x=>x.id===pedidoId);
+      if(!p){toast('Pedido no encontrado',true);return;}
+      const item=(p.items||[])[itemIndex];
+      if(!item){toast('Ítem no encontrado',true);return;}
+      const eq=equipos.find(e=>e.id===equipoId);
+      if(!eq){toast('Equipo no encontrado',true);return;}
 
-    const esPieza=parte&&parte.startsWith('pieza:');
-    const piezaIdx=esPieza?parseInt(parte.split(':')[1]):null;
+      const esPieza=parte&&parte.startsWith('pieza:');
+      const piezaIdx=esPieza?parseInt(parte.split(':')[1]):null;
 
-    const cubActual=esPieza?(item.partes?.[piezaIdx]?.cubierto||0):(parte?(item[parte]?.cubierto||0):(item.cubierto||0));
-    const necesarioTotal=esPieza?((item.partes?.[piezaIdx]?.cantidad||0)*(item.cantidad||0)):(item.cantidad||0);
-    const pend=necesarioTotal-cubActual;
-    const maximo=Math.min(pend,eq.disponible||0);
-    if(monto<=0||monto>maximo){toast(`Cantidad inválida (máx ${maximo})`,true);return;}
-    const nombreDesc=esPieza?`${item.partes[piezaIdx]?.nombre||eq.nombre} (pieza de ${item.equipoNombre})`:(parte?`${parteLabel(parte)} (${eq.nombre})`:`"${item.equipoNombre}"`);
+      const cubActual=esPieza?(item.partes?.[piezaIdx]?.cubierto||0):(parte?(item[parte]?.cubierto||0):(item.cubierto||0));
+      const necesarioTotal=esPieza?((item.partes?.[piezaIdx]?.cantidad||0)*(item.cantidad||0)):(item.cantidad||0);
+      const pend=necesarioTotal-cubActual;
+      const maximo=Math.min(pend,eq.disponible||0);
+      if(monto<=0||monto>maximo){toast(`Cantidad inválida (máx ${maximo})`,true);return;}
+      const nombreDesc=esPieza?`${item.partes[piezaIdx]?.nombre||eq.nombre} (pieza de ${item.equipoNombre})`:(parte?`${parteLabel(parte)} (${eq.nombre})`:`"${item.equipoNombre}"`);
 
-    // Aviso preventivo: si esto afecta a un acople compuesto (porque es una de sus piezas, o
-    // porque es la pieza suelta tomada directamente), avisar si deja el acople por debajo del mínimo.
-    let avisoMinimo='';
-    const sedeEq=sedeDeEquipo(eq);
-    if(esPieza){
-      const acopleItem=equipos.find(a=>a.id===item.equipoId);
-      if(acopleItem){
-        const minimo=acopleItem.minimoAcoples??5;
-        const proyectado=disponibleAcopleCompuestoProyectado(acopleItem,sedeEq,equipoId,monto);
-        if(proyectado<minimo) avisoMinimo+=`\n⚠️ Esto dejará solo ${proyectado} acoples completos de "${acopleItem.nombre}", por debajo del mínimo de ${minimo}.`;
-      }
-    } else if(eq.tipo==='piezas_acople'){
-      for(const acopleAfectado of acoplesQueUsanPieza(eq)){
-        const minimo=acopleAfectado.minimoAcoples??5;
-        const proyectado=disponibleAcopleCompuestoProyectado(acopleAfectado,sedeEq,equipoId,monto);
-        if(proyectado<minimo) avisoMinimo+=`\n⚠️ Esto dejará solo ${proyectado} acoples completos de "${acopleAfectado.nombre}", por debajo del mínimo de ${minimo}.`;
-      }
-    }
-
-    if(!confirm(`¿Asignar ${monto} de ${nombreDesc} al pedido "${p.nombre}"? Quedará reservado para ese pedido.${avisoMinimo}`)) return;
-
-    await updateDoc(doc(db,'inv_equipos',equipoId),{
-      disponible:increment(-monto),
-      reservado:increment(monto)
-    });
-    const updItems=p.items.map((it,i)=>{
-      if(i!==itemIndex) return it;
+      // Aviso preventivo: si esto afecta a un acople compuesto (porque es una de sus piezas, o
+      // porque es la pieza suelta tomada directamente), avisar si deja el acople por debajo del mínimo.
+      let avisoMinimo='';
+      const sedeEq=sedeDeEquipo(eq);
       if(esPieza){
-        const partesNuevas=(it.partes||[]).map((pz,pi)=>pi===piezaIdx?{...pz,cubierto:(pz.cubierto||0)+monto}:pz);
-        return {...it,partes:partesNuevas};
+        const acopleItem=equipos.find(a=>a.id===item.equipoId);
+        if(acopleItem){
+          const minimo=acopleItem.minimoAcoples??5;
+          const proyectado=disponibleAcopleCompuestoProyectado(acopleItem,sedeEq,equipoId,monto);
+          if(proyectado<minimo) avisoMinimo+=`\n⚠️ Esto dejará solo ${proyectado} acoples completos de "${acopleItem.nombre}", por debajo del mínimo de ${minimo}.`;
+        }
+      } else if(eq.tipo==='piezas_acople'){
+        for(const acopleAfectado of acoplesQueUsanPieza(eq)){
+          const minimo=acopleAfectado.minimoAcoples??5;
+          const proyectado=disponibleAcopleCompuestoProyectado(acopleAfectado,sedeEq,equipoId,monto);
+          if(proyectado<minimo) avisoMinimo+=`\n⚠️ Esto dejará solo ${proyectado} acoples completos de "${acopleAfectado.nombre}", por debajo del mínimo de ${minimo}.`;
+        }
       }
-      if(parte) return {...it,[parte]:{...it[parte],cubierto:(it[parte]?.cubierto||0)+monto}};
-      return {...it,cubierto:(it.cubierto||0)+monto};
-    });
-    await updateDoc(doc(db,'inv_pedidos',pedidoId),{items:updItems});
-    if(pedidoActual&&pedidoActual.id===pedidoId){
-      pedidoActual.items=updItems;
-      renderModalPedido();
+
+      if(!confirm(`¿Asignar ${monto} de ${nombreDesc} al pedido "${p.nombre}"? Quedará reservado para ese pedido.${avisoMinimo}`)) return;
+
+      await updateDoc(doc(db,'inv_equipos',equipoId),{
+        disponible:increment(-monto),
+        reservado:increment(monto)
+      });
+      const updItems=p.items.map((it,i)=>{
+        if(i!==itemIndex) return it;
+        if(esPieza){
+          const partesNuevas=(it.partes||[]).map((pz,pi)=>pi===piezaIdx?{...pz,cubierto:(pz.cubierto||0)+monto}:pz);
+          return {...it,partes:partesNuevas};
+        }
+        if(parte) return {...it,[parte]:{...it[parte],cubierto:(it[parte]?.cubierto||0)+monto}};
+        return {...it,cubierto:(it.cubierto||0)+monto};
+      });
+      p.items=updItems;
+      await updateDoc(doc(db,'inv_pedidos',pedidoId),{items:updItems});
+      if(pedidoActual&&pedidoActual.id===pedidoId){
+        pedidoActual.items=updItems;
+        renderModalPedido();
+      }
+      toast('✓ Asignado al pedido');
+    } finally {
+      asignacionesEnCurso.delete(claveOp);
     }
-    toast('✓ Asignado al pedido');
   }
 
   // Asigna de una sola vez todas las piezas que componen un acople compuesto (lo que haya
   // disponible ahora mismo de cada una), en vez de tener que asignarlas una por una.
   window.asignarConjuntoCompuesto=async function(pedidoId,itemIndex){
-    const p=pedidos.find(x=>x.id===pedidoId);
-    if(!p){toast('Pedido no encontrado',true);return;}
-    const item=(p.items||[])[itemIndex];
-    if(!item||!item.compuesto){toast('Ítem no encontrado',true);return;}
-    const partes=item.partes||[];
-    if(partes.length===0){toast('Este acople no tiene piezas configuradas',true);return;}
+    const claveOp=`${pedidoId}|${itemIndex}|compuesto`;
+    if(asignacionesEnCurso.has(claveOp)) return;
+    asignacionesEnCurso.add(claveOp);
+    try{
+      const p=pedidos.find(x=>x.id===pedidoId);
+      if(!p){toast('Pedido no encontrado',true);return;}
+      const item=(p.items||[])[itemIndex];
+      if(!item||!item.compuesto){toast('Ítem no encontrado',true);return;}
+      const partes=item.partes||[];
+      if(partes.length===0){toast('Este acople no tiene piezas configuradas',true);return;}
 
-    const plan=partes.map((pz,pIdx)=>{
-      const necesario=(pz.cantidad||0)*(item.cantidad||0);
-      const pend=necesario-(pz.cubierto||0);
-      const eqPieza=equipos.find(e=>e.id===pz.equipoId);
-      const disp=eqPieza?(eqPieza.disponible||0):0;
-      const monto=Math.max(0,Math.min(pend,disp));
-      return {pIdx,pz,monto};
-    });
-    const totalAAsignar=plan.reduce((s,x)=>s+x.monto,0);
-    if(totalAAsignar<=0){toast('No hay disponible ahora para ninguna pieza de este conjunto',true);return;}
-
-    const detalle=plan.filter(x=>x.monto>0).map(x=>`${x.pz.nombre}: ${x.monto}`).join(', ');
-    const faltantes=plan.filter(x=>x.monto<=0&&((x.pz.cantidad||0)*(item.cantidad||0)-(x.pz.cubierto||0))>0).map(x=>x.pz.nombre);
-    const avisoFaltante=faltantes.length>0?`\nSin stock todavía para: ${faltantes.join(', ')}.`:'';
-
-    // Aviso preventivo: si al asignar esto quedan menos acoples completos armables que el
-    // mínimo configurado para este acople, se incluye en el mismo aviso de confirmación.
-    const eqCompuesto=equipos.find(e=>e.id===item.equipoId);
-    let avisoMinimo='';
-    if(eqCompuesto){
-      const minimo=eqCompuesto.minimoAcoples??5;
-      const disponibleProyectado=Math.min(...plan.map(({pz,monto})=>{
+      const plan=partes.map((pz,pIdx)=>{
+        const necesario=(pz.cantidad||0)*(item.cantidad||0);
+        const pend=necesario-(pz.cubierto||0);
         const eqPieza=equipos.find(e=>e.id===pz.equipoId);
         const disp=eqPieza?(eqPieza.disponible||0):0;
-        return Math.floor((disp-monto)/(pz.cantidad||1));
-      }));
-      if(disponibleProyectado<minimo) avisoMinimo=`\n⚠️ Esto dejará solo ${disponibleProyectado} acoples completos de "${eqCompuesto.nombre}", por debajo del mínimo de ${minimo}.`;
-    }
-
-    if(!confirm(`¿Asignar todo el conjunto disponible ahora para "${item.equipoNombre}" en el pedido "${p.nombre}"?\n${detalle}${avisoFaltante}${avisoMinimo}`)) return;
-
-    for(const {pz,monto} of plan){
-      if(monto>0){
-        await updateDoc(doc(db,'inv_equipos',pz.equipoId),{disponible:increment(-monto),reservado:increment(monto)});
-      }
-    }
-    const updItems=p.items.map((it,i)=>{
-      if(i!==itemIndex) return it;
-      const partesNuevas=(it.partes||[]).map((pz,pi)=>{
-        const plani=plan.find(x=>x.pIdx===pi);
-        return plani&&plani.monto>0?{...pz,cubierto:(pz.cubierto||0)+plani.monto}:pz;
+        const monto=Math.max(0,Math.min(pend,disp));
+        return {pIdx,pz,monto};
       });
-      return {...it,partes:partesNuevas};
-    });
-    await updateDoc(doc(db,'inv_pedidos',pedidoId),{items:updItems});
-    if(pedidoActual&&pedidoActual.id===pedidoId){
-      pedidoActual.items=updItems;
-      renderModalPedido();
+      const totalAAsignar=plan.reduce((s,x)=>s+x.monto,0);
+      if(totalAAsignar<=0){toast('No hay disponible ahora para ninguna pieza de este conjunto',true);return;}
+
+      const detalle=plan.filter(x=>x.monto>0).map(x=>`${x.pz.nombre}: ${x.monto}`).join(', ');
+      const faltantes=plan.filter(x=>x.monto<=0&&((x.pz.cantidad||0)*(item.cantidad||0)-(x.pz.cubierto||0))>0).map(x=>x.pz.nombre);
+      const avisoFaltante=faltantes.length>0?`\nSin stock todavía para: ${faltantes.join(', ')}.`:'';
+
+      // Aviso preventivo: si al asignar esto quedan menos acoples completos armables que el
+      // mínimo configurado para este acople, se incluye en el mismo aviso de confirmación.
+      const eqCompuesto=equipos.find(e=>e.id===item.equipoId);
+      let avisoMinimo='';
+      if(eqCompuesto){
+        const minimo=eqCompuesto.minimoAcoples??5;
+        const disponibleProyectado=Math.min(...plan.map(({pz,monto})=>{
+          const eqPieza=equipos.find(e=>e.id===pz.equipoId);
+          const disp=eqPieza?(eqPieza.disponible||0):0;
+          return Math.floor((disp-monto)/(pz.cantidad||1));
+        }));
+        if(disponibleProyectado<minimo) avisoMinimo=`\n⚠️ Esto dejará solo ${disponibleProyectado} acoples completos de "${eqCompuesto.nombre}", por debajo del mínimo de ${minimo}.`;
+      }
+
+      if(!confirm(`¿Asignar todo el conjunto disponible ahora para "${item.equipoNombre}" en el pedido "${p.nombre}"?\n${detalle}${avisoFaltante}${avisoMinimo}`)) return;
+
+      for(const {pz,monto} of plan){
+        if(monto>0){
+          await updateDoc(doc(db,'inv_equipos',pz.equipoId),{disponible:increment(-monto),reservado:increment(monto)});
+        }
+      }
+      const updItems=p.items.map((it,i)=>{
+        if(i!==itemIndex) return it;
+        const partesNuevas=(it.partes||[]).map((pz,pi)=>{
+          const plani=plan.find(x=>x.pIdx===pi);
+          return plani&&plani.monto>0?{...pz,cubierto:(pz.cubierto||0)+plani.monto}:pz;
+        });
+        return {...it,partes:partesNuevas};
+      });
+      p.items=updItems;
+      await updateDoc(doc(db,'inv_pedidos',pedidoId),{items:updItems});
+      if(pedidoActual&&pedidoActual.id===pedidoId){
+        pedidoActual.items=updItems;
+        renderModalPedido();
+      }
+      toast(faltantes.length>0?'✓ Conjunto asignado parcialmente — aún falta stock en alguna pieza':'✓ Conjunto asignado completo al pedido');
+    } finally {
+      asignacionesEnCurso.delete(claveOp);
     }
-    toast(faltantes.length>0?'✓ Conjunto asignado parcialmente — aún falta stock en alguna pieza':'✓ Conjunto asignado completo al pedido');
   }
 
 
