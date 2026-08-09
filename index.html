@@ -3304,19 +3304,45 @@
     // eso su disponibilidad se calcula y se muestra en un cuadro POR SEDE, no en uno solo global.
     const equiposParaPaginar=equiposFiltrados.filter(e=>!e.compuesto);
 
+    // Agrupa TODOS los equipos filtrados (sin paginar todavía) por localización, para poder
+    // paginar por ubicaciones completas más abajo y que una misma ubicación nunca quede
+    // partida entre dos páginas distintas.
+    const gruposCompletos={};
+    localizaciones.forEach(l=>{ gruposCompletos[etiquetaLoc(l)]=[]; });
+    equiposParaPaginar.forEach(eq=>{
+      if(!gruposCompletos[eq.localizacion]) gruposCompletos[eq.localizacion]=[];
+      gruposCompletos[eq.localizacion].push(eq);
+    });
+    const gruposOrdenados=Object.entries(gruposCompletos)
+      .filter(([,eqs])=>eqs.length>0)
+      .sort(([a],[b])=>a.localeCompare(b));
+
     const porPag=invPorPagina();
     const total=equiposParaPaginar.length;
-    const totalPags=Math.max(1,Math.ceil(total/porPag));
-    if(invPagina>=totalPags) invPagina=0;
-    const inicio=invPagina*porPag;
-    const equiposPag=equiposParaPaginar.slice(inicio,inicio+porPag);
 
-    const grupos={};
-    localizaciones.forEach(l=>{ grupos[etiquetaLoc(l)]=[]; });
-    equiposPag.forEach(eq=>{
-      if(!grupos[eq.localizacion]) grupos[eq.localizacion]=[];
-      grupos[eq.localizacion].push(eq);
+    // Arma las páginas agrupando ubicaciones ENTERAS: cada página acumula ubicaciones hasta
+    // llegar (o pasarse un poco) del tamaño de página, pero nunca corta una ubicación a la
+    // mitad. Si una sola ubicación ya supera el tamaño de página, ocupa la página ella sola.
+    const paginasDeGrupos=[];
+    let paginaActual=[];
+    let countActual=0;
+    gruposOrdenados.forEach(grupo=>{
+      const eqs=grupo[1];
+      if(countActual>0&&countActual+eqs.length>porPag){
+        paginasDeGrupos.push(paginaActual);
+        paginaActual=[];
+        countActual=0;
+      }
+      paginaActual.push(grupo);
+      countActual+=eqs.length;
     });
+    if(paginaActual.length>0) paginasDeGrupos.push(paginaActual);
+
+    const totalPags=Math.max(1,paginasDeGrupos.length);
+    if(invPagina>=totalPags) invPagina=0;
+    const gruposPag=paginasDeGrupos[invPagina]||[];
+    const inicio=paginasDeGrupos.slice(0,invPagina).reduce((s,pg)=>s+pg.reduce((s2,g)=>s2+g[1].length,0),0);
+    const cantidadEnPagina=gruposPag.reduce((s,g)=>s+g[1].length,0);
 
     let html='';
 
@@ -3350,7 +3376,7 @@
       const candidatos=localizaciones.filter(l=>normLoc(etiquetaLoc(l))===normLoc(loc));
       return candidatos.length===1?etiquetaLoc(candidatos[0]):null;
     }
-    Object.entries(grupos).sort(([a],[b])=>a.localeCompare(b)).forEach(([loc,eqs])=>{
+    gruposPag.forEach(([loc,eqs])=>{
       if(eqs.length===0) return;
       const dispTotal=eqs.reduce((s,e)=>s+(e.disponible||0),0);
       const resTotal=eqs.reduce((s,e)=>s+Math.max(0,e.reservado||0),0);
@@ -3374,7 +3400,7 @@
         const act=i===invPagina;
         paginacion+=`<button onclick="irPaginaInv(${i})" style="width:34px;height:34px;border-radius:10px;border:1.5px solid ${act?'#1b2a1b':'#d8e4d8'};background:${act?'#1b2a1b':'#f7f9f7'};color:${act?'#fff':'#1b2a1b'};font-weight:700;font-size:13px;cursor:pointer;">${i+1}</button>`;
       }
-      paginacion+=`<p style="width:100%;text-align:center;font-size:11px;color:#aaa;margin-top:4px;">Mostrando ${inicio+1}–${Math.min(inicio+porPag,total)} de ${total}</p></div>`;
+      paginacion+=`<p style="width:100%;text-align:center;font-size:11px;color:#aaa;margin-top:4px;">Mostrando ${inicio+1}–${inicio+cantidadEnPagina} de ${total}</p></div>`;
     }
 
     cont.innerHTML=(html||'<p class="empty-msg">Sin resultados</p>')+paginacion;
