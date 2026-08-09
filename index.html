@@ -3133,7 +3133,7 @@
     const totalEquipos=equipos.length;
     const totalDisp=equipos.reduce((s,e)=>s+(e.disponible||0),0);
     const totalRes=equipos.reduce((s,e)=>s+Math.max(0,e.reservado||0),0);
-    const cero=equipos.filter(e=>(e.disponible||0)===0).length;
+    const cero=equipos.filter(e=>e.tipo!=='acople'&&(e.disponible||0)===0).length;
     const porTipo={};
     equipos.forEach(e=>{ porTipo[e.tipo]=(porTipo[e.tipo]||0)+(e.disponible||0); });
     const html=`
@@ -3232,14 +3232,16 @@
   }
 
   // Ficha "Sin stock": equipos con 0 disponibles, para revisarlos de un vistazo y poder abrir
-  // cada uno (misma tarjeta clickeable que en Inventario).
+  // cada uno (misma tarjeta clickeable que en Inventario). Los acoples no entran aquí: se dejan
+  // ver siempre en su ficha de localización aunque estén en 0. Como un equipo en 0 no tiene
+  // stock físico en ningún lado, tampoco se muestra su localización en la tarjeta.
   window.abrirFichaSinStock=function(){
-    const eqs=equipos.filter(e=>(e.disponible||0)===0)
+    const eqs=equipos.filter(e=>e.tipo!=='acople'&&(e.disponible||0)===0)
       .sort((a,b)=>(a.localizacion||'').localeCompare(b.localizacion||'')||a.nombre.localeCompare(b.nombre));
     document.getElementById('modalTitulo').textContent='🔴 Sin stock';
     document.getElementById('modalSub').textContent=`${eqs.length} referencia${eqs.length!==1?'s':''} con 0 disponibles`;
     document.getElementById('modalContenido').innerHTML=eqs.length>0
-      ?eqs.map(eq=>tarjetaEquipoInventario(eq)).join('')
+      ?eqs.map(eq=>tarjetaEquipoInventario(eq,undefined,true)).join('')
       :'<p class="empty-msg">Todo tiene stock 🎉</p>';
     document.querySelector('#modalOverlay .modal-box')?.classList.remove('modal-box-mitad');
     document.getElementById('modalOverlay').classList.remove('hidden');
@@ -3357,14 +3359,14 @@
     renderInventario();
   }
 
-  function tarjetaEquipoInventario(eq,sede){
+  function tarjetaEquipoInventario(eq,sede,ocultarLoc){
     const disp=eq.compuesto?disponibleAcopleCompuesto(eq,sede):(eq.disponible||0);
     const res=eq.compuesto?reservadoAcopleCompuesto(eq,sede):Math.max(0,eq.reservado||0);
     return `<div class="equipo-inv-card" onclick="abrirDetalleEquipo('${eq.id}')">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;">
         <div style="flex:1;">
           <p class="equipo-inv-nombre">${eq.compuesto?'🔗 ':''}${eq.nombre}</p>
-          <div style="margin-top:4px;">${badgeHTML(eq.tipo)}${eq.compuesto?'':`<span class="badge-loc">${eq.localizacion}</span>`}${eq.variante?`<span class="badge-loc" style="background:#ede7f6;color:#4527a0;">🔸 ${eq.variante}</span>`:''}${eq.compuesto?`<span class="badge-loc" style="background:#ede7f6;color:#6a1b9a;">🔗 Compuesto</span>`:''}</div>
+          <div style="margin-top:4px;">${badgeHTML(eq.tipo)}${eq.compuesto||ocultarLoc?'':`<span class="badge-loc">${eq.localizacion}</span>`}${eq.variante?`<span class="badge-loc" style="background:#ede7f6;color:#4527a0;">🔸 ${eq.variante}</span>`:''}${eq.compuesto?`<span class="badge-loc" style="background:#ede7f6;color:#6a1b9a;">🔗 Compuesto</span>`:''}</div>
           ${eq.observacion?`<p class="equipo-inv-obs">📝 ${eq.observacion}</p>`:''}
           ${eq.compuesto?`<p style="font-size:11px;color:#aaa;margin-top:4px;">${(eq.partes||[]).map(p=>`${p.nombre} X ${p.cantidad}`).join(' · ')}</p>`:''}
           ${eq.compuesto?`<p style="font-size:11px;margin-top:2px;color:${disp<(eq.minimoAcoples??5)?'#c62828':'#aaa'};">Mínimo: ${eq.minimoAcoples??5}${disp<(eq.minimoAcoples??5)?' ⚠️ por debajo del mínimo':''}</p>`:''}
@@ -3413,7 +3415,10 @@
     // Los acoples compuestos no tienen localización real: se arman con piezas sueltas que sí
     // tienen sede, y no se pueden mezclar piezas de sedes distintas (son bodegas separadas). Por
     // eso su disponibilidad se calcula y se muestra en un cuadro POR SEDE, no en uno solo global.
-    const equiposParaPaginar=equiposFiltrados.filter(e=>!e.compuesto);
+    // Además, dentro de cada ficha de localización se ocultan los equipos con 0 disponibles
+    // (ya no hay stock físico ahí) EXCEPTO los de tipo "acople", que se dejan ver aunque estén
+    // en 0 porque son piezas de referencia que igual conviene ver en su ubicación.
+    const equiposParaPaginar=equiposFiltrados.filter(e=>!e.compuesto&&(e.tipo==='acople'||(e.disponible||0)>0));
 
     // Agrupa TODOS los equipos filtrados (sin paginar todavía) por localización, para poder
     // paginar por ubicaciones completas más abajo y que una misma ubicación nunca quede
