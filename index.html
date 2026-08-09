@@ -260,6 +260,8 @@
     .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1b2a1b;color:#fff;padding:10px 20px;border-radius:20px;font-size:13px;font-weight:600;z-index:200;opacity:0;transition:opacity 0.3s;pointer-events:none;white-space:nowrap;}
     .toast.show{opacity:1;}
     .toast.error{background:#c62828;}
+    /* ── BANNER DE ACTUALIZACIÓN EN CURSO ── */
+    .update-banner{position:fixed;top:0;left:0;right:0;background:#1b2a1b;color:#fff;padding:10px 16px;font-size:13px;font-weight:600;z-index:99998;display:flex;align-items:center;justify-content:center;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.2);}
     /* ── ACOPLE WARNING ── */
     .acople-warn{background:#fff8e1;border:1.5px solid #ffe082;border-radius:12px;padding:12px;margin-top:10px;font-size:13px;color:#e65100;}
     /* ── CONFIG ── */
@@ -12127,10 +12129,44 @@
   }
 
 </script>  <script>
-    // Registra el service worker para que la app se pueda instalar (PWA).
+    // Registra el service worker para que la app se pueda instalar (PWA), y detecta cuándo
+    // hay una versión nueva disponible para avisarle al usuario en vez de dejarlo pegado en
+    // una copia vieja indefinidamente.
     if('serviceWorker' in navigator){
+      let recargando=false;
+      let huboControladorPrevio=false;
+
+      function mostrarBannerActualizando(){
+        if(document.getElementById('updateBanner')) return; // ya se está mostrando
+        const banner=document.createElement('div');
+        banner.id='updateBanner';
+        banner.className='update-banner';
+        banner.innerHTML=`<span>🔄 Actualizando a la última versión…</span>`;
+        document.body.appendChild(banner);
+      }
+
+      // sw.js ya activa la versión nueva solo (skipWaiting + clients.claim), sin pedir
+      // confirmación — lo único que faltaba era que la pestaña ya abierta se enterara y
+      // recargara para cargar el HTML/JS nuevo (si no, se queda ejecutando el código viejo
+      // en memoria aunque el service worker de fondo ya haya cambiado).
+      navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+        if(recargando||!huboControladorPrevio) return; // no recargar en la instalación inicial
+        recargando=true;
+        mostrarBannerActualizando();
+        setTimeout(()=>window.location.reload(), 400);
+      });
+
       window.addEventListener('load', ()=>{
-        navigator.serviceWorker.register('sw.js').catch(err=>console.warn('SW no registrado:', err));
+        huboControladorPrevio=!!navigator.serviceWorker.controller;
+        navigator.serviceWorker.register('sw.js').then(reg=>{
+          // Por defecto el navegador solo revisa si hay sw.js nuevo al navegar/recargar la
+          // página. Como esta es una PWA que la gente deja abierta días enteros, forzamos
+          // la revisión cada vez que vuelve a primer plano (mismo patrón que ya usa la app
+          // para reconectar Firestore).
+          document.addEventListener('visibilitychange', ()=>{
+            if(document.visibilityState==='visible') reg.update().catch(()=>{});
+          });
+        }).catch(err=>console.warn('SW no registrado:', err));
       });
     }
   </script>

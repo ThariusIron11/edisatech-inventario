@@ -36,9 +36,13 @@ self.addEventListener('fetch', (event) => {
 
   // Para el HTML principal: intenta la red primero (para tener siempre la última versión).
   // Si no hay internet, usa lo último que quedó guardado.
+  // "cache: no-store" es clave: sin esto, el fetch de "network-first" igual puede recibir
+  // una respuesta guardada por la caché HTTP normal del navegador (según los headers
+  // Cache-Control del servidor), y el usuario seguiría viendo una versión vieja aunque el
+  // service worker sí esté intentando ir a la red.
   if (event.request.mode === 'navigate' || url.endsWith('.html')) {
     event.respondWith(
-      fetch(event.request)
+      fetch(event.request, { cache: 'no-store' })
         .then((res) => {
           const clone = res.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
