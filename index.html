@@ -808,9 +808,11 @@
           <input type="search" id="buscarCatalogo" placeholder="Buscar equipo, localización, tipo..." style="margin:0;" autocomplete="off" oninput="catalogoPagina=0;renderCatalogoEquipos();onInputBuscarCatalogo();" onfocus="onInputBuscarCatalogo()" />
           <div class="autocomplete-list" id="buscarCatalogoList"></div>
         </div>
-        <select id="filtroCatTipo" style="margin:0;flex:1;min-width:140px;" onchange="catalogoPagina=0;renderCatalogoEquipos()">
-          <option value="">— Todos los tipos —</option>
-        </select>
+        <div class="autocomplete-wrap" style="flex:1;min-width:140px;">
+          <input type="text" id="filtroCatTipoTexto" placeholder="— Todos los tipos —" autocomplete="off" style="margin:0;" oninput="onInputFiltroCatTipo()" onfocus="onInputFiltroCatTipo()" onblur="onBlurFiltroCatTipo()" />
+          <div class="autocomplete-list" id="filtroCatTipoList"></div>
+        </div>
+        <input type="hidden" id="filtroCatTipo" value="" />
       </div>
       <div id="catalogoEquipos"><p class="loading">Cargando...</p></div>
     </div>
@@ -1365,6 +1367,7 @@
   // ── PAGINACIÓN INVENTARIO ──
   let invPagina=0;
   let invAcoplesCompuestosAbierto=new Set(); // sedes con el cuadro "Acoples compuestos" desplegado
+  let invLocAbiertas=new Set(); // localizaciones expandidas manualmente en Inventario (retraídas por defecto)
   const INV_POR_PAG_MOVIL=8;
   const INV_POR_PAG_PC=30;
   function invPorPagina(){ return window.innerWidth>=900?INV_POR_PAG_PC:INV_POR_PAG_MOVIL; }
@@ -3243,18 +3246,20 @@
       });
     }
 
+    const buscandoOFiltrando=!!busq||invFiltroTipos.length>0;
     Object.entries(grupos).sort(([a],[b])=>a.localeCompare(b)).forEach(([loc,eqs])=>{
       if(eqs.length===0) return;
       const dispTotal=eqs.reduce((s,e)=>s+(e.disponible||0),0);
       const resTotal=eqs.reduce((s,e)=>s+(e.reservado||0),0);
-      html+=`<div class="loc-header">
+      const abierto=buscandoOFiltrando?true:invLocAbiertas.has(loc);
+      html+=`<div class="loc-header" style="cursor:pointer;" onclick="toggleLoc('${loc}')">
         <span class="loc-letra">📍</span>
         <span>${loc}</span>
-        <span class="loc-count">${eqs.length} equipo${eqs.length!==1?'s':''} · ${dispTotal} disp · ${resTotal} res</span>
+        <span class="loc-count">${eqs.length} equipo${eqs.length!==1?'s':''} · ${dispTotal} disp · ${resTotal} res &nbsp;${abierto?'▲':'▼'}</span>
       </div>
-      <div class="loc-body">
+      ${abierto?`<div class="loc-body">
         ${eqs.map(tarjetaEquipoInventario).join('')}
-      </div>`;
+      </div>`:''}`;
     });
 
     let paginacion='';
@@ -3282,7 +3287,11 @@
     renderInventario();
   }
 
-  window.toggleLoc=function(id){}
+  window.toggleLoc=function(loc){
+    if(invLocAbiertas.has(loc)) invLocAbiertas.delete(loc);
+    else invLocAbiertas.add(loc);
+    renderInventario();
+  }
 
   let editPartesTemp=[]; // piezas del acople compuesto que se está editando
   window.abrirDetalleEquipoCompuesto=function(id){
@@ -5332,7 +5341,12 @@
         return nueva<cubActual?cubActual-nueva:0;
       }
       const excesoMotor=calcExceso(item.motor);
-      const excesoReductor=calcExceso(item.reductor);
+      // El reductor puede tener unidades marcadas "armado" (su reserva real ya se liberó al
+      // marcarlas — ver guardarMarcarArmado), así que no se puede liberar más de lo que
+      // realmente sigue reservado en el catálogo para él.
+      const excesoReductorBruto=calcExceso(item.reductor);
+      const reservadoRealReductor=Math.max(0,(item.reductor?.cubierto||0)-(item.armadoLiberado||0));
+      const excesoReductor=Math.min(excesoReductorBruto,reservadoRealReductor);
       const excesoBrazo=item.tieneBrazo?calcExceso(item.brazo):0;
       const excesoEjeSolido=item.tieneEjeSolido?calcExceso(item.eje_solido):0;
       const totalExceso=excesoMotor+excesoReductor+excesoBrazo+excesoEjeSolido;
@@ -5355,12 +5369,17 @@
       if(excesoEjeSolido>0){
         await updateDoc(doc(db,'inv_equipos',item.eje_solido.equipoId),{disponible:increment(excesoEjeSolido),reservado:increment(-excesoEjeSolido)});
       }
+      // El cubierto del reductor baja el monto completo (para que quede consistente con la nueva
+      // cantidad), pero si parte de ese exceso correspondía a unidades armado (cuya reserva ya
+      // se había liberado antes), armadoLiberado también baja esa diferencia — esas unidades ya
+      // no forman parte del ítem.
+      const armadoLiberado=Math.max(0,(item.armadoLiberado||0)-(excesoReductorBruto-excesoReductor));
       const motor=item.motor?{...item.motor,cubierto:(item.motor.cubierto||0)-excesoMotor}:item.motor;
-      const reductor=item.reductor?{...item.reductor,cubierto:(item.reductor.cubierto||0)-excesoReductor}:item.reductor;
+      const reductor=item.reductor?{...item.reductor,cubierto:(item.reductor.cubierto||0)-excesoReductorBruto}:item.reductor;
       const brazo=item.tieneBrazo&&item.brazo?{...item.brazo,cubierto:(item.brazo.cubierto||0)-excesoBrazo}:item.brazo;
       const eje_solido=item.tieneEjeSolido&&item.eje_solido?{...item.eje_solido,cubierto:(item.eje_solido.cubierto||0)-excesoEjeSolido}:item.eje_solido;
       const unidades=unidadesForzadas?unidadesForzadas:(item.unidades?ajustarUnidades(item.unidades,nueva,true):item.unidades);
-      const updItems=p.items.map((it,i)=>i===itemIndex?{...it,cantidad:nueva,motor,reductor,...(it.tieneBrazo?{brazo}:{}),...(it.tieneEjeSolido?{eje_solido}:{}),...(unidades?{unidades}:{})}:it);
+      const updItems=p.items.map((it,i)=>i===itemIndex?{...it,cantidad:nueva,motor,reductor,armadoLiberado,...(it.tieneBrazo?{brazo}:{}),...(it.tieneEjeSolido?{eje_solido}:{}),...(unidades?{unidades}:{})}:it);
       await updateDoc(doc(db,'inv_pedidos',pedidoId),{items:updItems});
       if(pedidoActual.id===pedidoId){pedidoActual.items=updItems;renderModalPedido();}
       toast('✓ Cantidad actualizada');
@@ -5408,16 +5427,24 @@
       if(!confirm(msg)) return;
     }
 
-    if(exceso>0){
+    // Puede haber unidades marcadas "armado" cuya reserva real ya se liberó antes (ver
+    // guardarMarcarArmado) — no se puede liberar del stock más de lo que sigue reservado de
+    // verdad; la diferencia, si la hay, se descuenta de armadoLiberado en vez de del catálogo.
+    const armadoLibActual=item.armadoLiberado||0;
+    const reservadoReal=Math.max(0,cubActual-armadoLibActual);
+    const excesoReal=Math.min(exceso,reservadoReal);
+    const armadoLiberado=Math.max(0,armadoLibActual-(exceso-excesoReal));
+
+    if(excesoReal>0){
       await updateDoc(doc(db,'inv_equipos',item.equipoId),{
-        disponible:increment(exceso),
-        reservado:increment(-exceso)
+        disponible:increment(excesoReal),
+        reservado:increment(-excesoReal)
       });
     }
     const updItems=p.items.map((it,i)=>{
       if(i!==itemIndex) return it;
       const unidades=unidadesForzadas?unidadesForzadas:(it.unidades?ajustarUnidades(it.unidades,nueva,false):it.unidades);
-      return {...it,cantidad:nueva,cubierto:cubNuevo,...(unidades?{unidades}:{})};
+      return {...it,cantidad:nueva,cubierto:cubNuevo,armadoLiberado,...(unidades?{unidades}:{})};
     });
     await updateDoc(doc(db,'inv_pedidos',pedidoId),{items:updItems});
     if(pedidoActual.id===pedidoId){
@@ -5545,7 +5572,8 @@
         await updateDoc(doc(db,'inv_equipos',item.motor.equipoId),{disponible:increment(cubM),reservado:increment(-cubM)});
       }
       if(cubR>0&&item.reductor?.equipoId){
-        await updateDoc(doc(db,'inv_equipos',item.reductor.equipoId),{disponible:increment(cubR),reservado:increment(-cubR)});
+        const activoR=Math.max(0,cubR-(item.armadoLiberado||0));
+        if(activoR>0) await updateDoc(doc(db,'inv_equipos',item.reductor.equipoId),{disponible:increment(activoR),reservado:increment(-activoR)});
       }
       if(cubB>0&&item.brazo?.equipoId){
         await updateDoc(doc(db,'inv_equipos',item.brazo.equipoId),{disponible:increment(cubB),reservado:increment(-cubB)});
@@ -5574,9 +5602,10 @@
     if(!confirm(`¿Retirar "${item.equipoNombre}" de este pedido?${cub>0?` Se liberarán ${cub} unidades reservadas.`:''}`)) return;
 
     if(cub>0){
-      await updateDoc(doc(db,'inv_equipos',item.equipoId),{
-        disponible:increment(cub),
-        reservado:increment(-cub)
+      const activo=Math.max(0,cub-(item.armadoLiberado||0));
+      if(activo>0) await updateDoc(doc(db,'inv_equipos',item.equipoId),{
+        disponible:increment(activo),
+        reservado:increment(-activo)
       });
     }
     const updItems=itemsBase.filter((it,i)=>i!==itemIndex);
@@ -8192,17 +8221,33 @@
     if(totalSale===0) return {ok:false, motivo:'Este envío no tiene equipos para despachar'};
 
     // Agrupar por equipo físico (expandiendo motoreductor en motor+reductor+brazo, y acople
-    // compuesto en sus piezas) para el aviso de acoples y para bajar reservado
+    // compuesto en sus piezas) para el aviso de acoples y para bajar reservado.
+    // Las unidades marcadas "armado" no tienen reserva real en el catálogo (se liberó antes, al
+    // marcarlas — ver guardarMarcarArmado), así que se excluyen del descuento de reservado aquí;
+    // solo se registran como movimiento de salida (más abajo), no como consumo de stock.
     const qtyPorEquipo={}; // equipoId -> {cantidad, equipoNombre}
-    for(const idxStr of Object.keys(cantidadPorItem)){
-      const idx=parseInt(idxStr);
-      const item=items[idx];
-      const qty=cantidadPorItem[idx];
-      const partes=partesFisicasDeItem(item,qty).filter(p=>p.equipoId);
-      partes.forEach(p=>{
-        if(!qtyPorEquipo[p.equipoId]) qtyPorEquipo[p.equipoId]={cantidad:0,equipoNombre:p.equipoNombre};
-        qtyPorEquipo[p.equipoId].cantidad+=p.cantidad;
-      });
+    const armadoDespachadoPorItem={}; // itemIndex -> cuántas unidades armado se despacharon (para ajustar armadoLiberado)
+    for(const r of (envio.remisiones||[])){
+      for(const reg of (r.items||[])){
+        const item=items[reg.itemIndex];
+        if(!item) continue;
+        if(reg.tipo==='serial'){
+          const unidadIndices=reg.unidadIndices||[];
+          const nArmado=unidadIndices.filter(j=>item.unidades?.[j]?.armado).length;
+          if(nArmado>0) armadoDespachadoPorItem[reg.itemIndex]=(armadoDespachadoPorItem[reg.itemIndex]||0)+nArmado;
+          const partes=partesFisicasDeItemPorUnidades(item,unidadIndices).filter(p=>p.equipoId&&!p.armado);
+          partes.forEach(p=>{
+            if(!qtyPorEquipo[p.equipoId]) qtyPorEquipo[p.equipoId]={cantidad:0,equipoNombre:p.equipoNombre};
+            qtyPorEquipo[p.equipoId].cantidad+=p.cantidad;
+          });
+        } else {
+          const partes=partesFisicasDeItem(item,reg.cantidad).filter(p=>p.equipoId);
+          partes.forEach(p=>{
+            if(!qtyPorEquipo[p.equipoId]) qtyPorEquipo[p.equipoId]={cantidad:0,equipoNombre:p.equipoNombre};
+            qtyPorEquipo[p.equipoId].cantidad+=p.cantidad;
+          });
+        }
+      }
     }
 
     // Acople warning check
@@ -8217,11 +8262,13 @@
       }
     }
 
-    // Actualizar items del pedido (marcar despachado)
+    // Actualizar items del pedido (marcar despachado, y descontar armadoLiberado por las
+    // unidades armado que se acaban de despachar — ya no están pendientes)
     const updItems=items.map((item,idx)=>{
       const qty=cantidadPorItem[idx];
       if(!qty) return item;
-      return {...item,despachado:(item.despachado||0)+qty};
+      const nArmado=armadoDespachadoPorItem[idx]||0;
+      return {...item,despachado:(item.despachado||0)+qty,...(nArmado>0?{armadoLiberado:Math.max(0,(item.armadoLiberado||0)-nArmado)}:{})};
     });
 
     // Bajar reservado (una vez por equipo físico, ya agrupado — los acoples compuestos ya vienen
@@ -8598,7 +8645,7 @@
         if(activoM>0&&item.motor?.equipoId){
           await updateDoc(doc(db,'inv_equipos',item.motor.equipoId),{disponible:increment(activoM),reservado:increment(-activoM)});
         }
-        const activoR=(item.reductor?.cubierto||0)-(item.despachado||0);
+        const activoR=Math.max(0,(item.reductor?.cubierto||0)-(item.despachado||0)-(item.armadoLiberado||0));
         if(activoR>0&&item.reductor?.equipoId){
           await updateDoc(doc(db,'inv_equipos',item.reductor.equipoId),{disponible:increment(activoR),reservado:increment(-activoR)});
         }
@@ -8626,7 +8673,7 @@
         }
         continue;
       }
-      const reservadoActivo=(item.cubierto||0)-(item.despachado||0);
+      const reservadoActivo=Math.max(0,(item.cubierto||0)-(item.despachado||0)-(item.armadoLiberado||0));
       if(reservadoActivo>0){
         await updateDoc(doc(db,'inv_equipos',item.equipoId),{
           disponible:increment(reservadoActivo),
@@ -9638,7 +9685,8 @@
     }
 
     if(localizaciones.length===0){lista.innerHTML='<p class="empty-msg">Sin localizaciones</p>';return;}
-    lista.innerHTML=localizaciones.map(l=>`
+    const localizacionesOrdenadas=[...localizaciones].sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));
+    lista.innerHTML=localizacionesOrdenadas.map(l=>`
       <div class="config-item">
         <span class="badge-loc">${l.nombre}</span>
         <span class="config-item-label" style="cursor:pointer;" title="Clic para editar la sede" onclick="editarSedeLoc('${l.id}')">${etiquetaLoc(l)}${l.sede?'':' <span style="color:#e65100;font-size:11px;">(sin sede — clic para asignar)</span>'}</span>
@@ -11919,6 +11967,38 @@
     document.getElementById('catObs').value='';
     document.getElementById('catUsaSerial').checked=false;
     actualizarCatUsaSerialSegunTipo();
+  }
+
+  window.onInputFiltroCatTipo=function(){
+    const q=document.getElementById('filtroCatTipoTexto').value.trim().toLowerCase();
+    const opciones=tipos.filter(t=>!q||t.nombre.toLowerCase().includes(q));
+    const items=opciones.map(t=>({
+      label:`${t.emoji||''} ${t.nombre}`,
+      onClick:()=>seleccionarFiltroCatTipo(t.valor,t.nombre)
+    }));
+    if(!q||'todos los tipos'.includes(q)) items.unshift({label:'— Todos los tipos —',onClick:()=>seleccionarFiltroCatTipo('','')});
+    renderAutocompleteList(document.getElementById('filtroCatTipoList'), items, items.length===0?'Sin tipos que coincidan':null);
+  }
+
+  window.seleccionarFiltroCatTipo=function(valor,nombre){
+    document.getElementById('filtroCatTipoTexto').value=nombre;
+    document.getElementById('filtroCatTipo').value=valor;
+    closeAllAutocomplete();
+    catalogoPagina=0; renderCatalogoEquipos();
+  }
+
+  window.onBlurFiltroCatTipo=function(){
+    setTimeout(()=>{
+      const txt=document.getElementById('filtroCatTipoTexto')?.value.trim().toLowerCase()||'';
+      if(!txt){ seleccionarFiltroCatTipo('',''); return; }
+      const match=tipos.find(t=>t.nombre.toLowerCase()===txt);
+      if(match){
+        if(document.getElementById('filtroCatTipo').value!==match.valor) seleccionarFiltroCatTipo(match.valor,match.nombre);
+      } else {
+        const actual=tipos.find(t=>t.valor===document.getElementById('filtroCatTipo').value);
+        document.getElementById('filtroCatTipoTexto').value=actual?.nombre||'';
+      }
+    },150);
   }
 
   window.onInputBuscarCatalogo=function(){
