@@ -401,6 +401,10 @@
     <select id="invFiltroSede" style="margin-top:10px;" onchange="onCambioFiltroSedeInv()">
       <option value="">🏢 Todas las sedes</option>
     </select>
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <button class="btn-sm" style="background:#f7f9f7;color:#1b2a1b;flex:1;" onclick="expandirTodasLocs()">⬇️ Expandir todo</button>
+      <button class="btn-sm" style="background:#f7f9f7;color:#1b2a1b;flex:1;" onclick="contraerTodasLocs()">⬆️ Contraer todo</button>
+    </div>
     <div id="invContenido"><p class="loading">Cargando...</p></div>
   </div>
   <!-- Segunda columna desktop: resumen rápido -->
@@ -756,6 +760,7 @@
         <input type="text" id="nuevoTipoNombre" placeholder="Ej: Rodamiento" style="margin:0;" />
         <button class="btn-sm" style="background:#1b2a1b;color:#fff;white-space:nowrap;" onclick="agregarTipo()">+ Agregar</button>
       </div>
+      <input type="search" id="buscarTipos" placeholder="Buscar tipo..." style="margin-bottom:10px;" oninput="renderTipos()" />
       <div id="listaTipos" style="display:flex;flex-direction:column;gap:8px;"><p class="loading">Cargando...</p></div>
     </div>
 
@@ -3537,6 +3542,20 @@
   window.toggleLoc=function(loc){
     if(invLocAbiertas.has(loc)) invLocAbiertas.delete(loc);
     else invLocAbiertas.add(loc);
+    renderInventario();
+  }
+
+  // Expande o contrae TODAS las fichas de localización (y el cuadro de acoples compuestos por
+  // sede) de una sola vez, en vez de tener que abrir/cerrar una por una.
+  window.expandirTodasLocs=function(){
+    invLocAbiertas=new Set(equipos.filter(e=>!e.compuesto).map(e=>e.localizacion));
+    const sedes=[...new Set(localizaciones.map(l=>l.sede).filter(Boolean))];
+    invAcoplesCompuestosAbierto=new Set(sedes.length>0?sedes:['']);
+    renderInventario();
+  }
+  window.contraerTodasLocs=function(){
+    invLocAbiertas=new Set();
+    invAcoplesCompuestosAbierto=new Set();
     renderInventario();
   }
 
@@ -9894,13 +9913,46 @@
     const lista=document.getElementById('listaTipos');
     if(!lista) return;
     if(tipos.length===0){lista.innerHTML='<p class="empty-msg">Sin tipos aún</p>';return;}
-    lista.innerHTML=tipos.map(t=>`
-      <div class="config-item">
+    const busq=(document.getElementById('buscarTipos')?.value||'').trim().toLowerCase();
+    const tiposFiltrados=busq?tipos.filter(t=>t.nombre.toLowerCase().includes(busq)):tipos;
+    if(tiposFiltrados.length===0){lista.innerHTML='<p class="empty-msg">Sin tipos que coincidan</p>';return;}
+    lista.innerHTML=tiposFiltrados.map(t=>{
+      const enEdicion=tipoEditandoId===t.id;
+      if(enEdicion){
+        return `<div class="config-item" style="flex-wrap:wrap;gap:8px;">
+          <input type="text" id="editTipoEmoji_${t.id}" value="${t.emoji||''}" maxlength="4" style="margin:0;width:56px;flex:none;text-align:center;" />
+          <input type="text" id="editTipoNombre_${t.id}" value="${t.nombre}" style="margin:0;flex:1;min-width:120px;" onkeydown="if(event.key==='Enter')guardarTipo('${t.id}')" />
+          <button class="btn-sm" style="background:#1b2a1b;color:#fff;" onclick="guardarTipo('${t.id}')">Guardar</button>
+          <button class="btn-sm" style="background:#eee;color:#555;" onclick="tipoEditandoId=null;renderTipos();">Cancelar</button>
+        </div>`;
+      }
+      return `<div class="config-item">
         <span class="badge" style="background:${t.bg};color:${t.color};">${t.emoji||''} ${t.nombre}</span>
         ${t.protegido
           ?'<span style="font-size:11px;color:#aaa;margin-left:auto;">🔒 permanente</span>'
-          :`<button class="btn-danger" style="margin-left:auto;" onclick="eliminarTipo('${t.id}')">✕</button>`}
-      </div>`).join('');
+          :`<div style="margin-left:auto;display:flex;gap:6px;">
+              <button class="btn-sm" style="background:#eee;color:#333;" onclick="tipoEditandoId='${t.id}';renderTipos();">✏️ Editar</button>
+              <button class="btn-danger" onclick="eliminarTipo('${t.id}')">✕</button>
+            </div>`}
+      </div>`;
+    }).join('');
+  }
+
+  // Solo permite editar nombre/emoji de un tipo NO permanente; el "valor" (slug interno con el
+  // que los equipos guardan su tipo) nunca cambia, así que renombrar no rompe nada existente.
+  let tipoEditandoId=null;
+  window.guardarTipo=async function(id){
+    const t=tipos.find(x=>x.id===id);
+    if(!t||t.protegido){toast('Este tipo es permanente',true);return;}
+    const nombre=document.getElementById(`editTipoNombre_${id}`)?.value.trim();
+    const emoji=document.getElementById(`editTipoEmoji_${id}`)?.value.trim()||'🏷️';
+    if(!nombre){toast('Escribe un nombre de tipo',true);return;}
+    if(tipos.find(x=>x.id!==id&&x.nombre.toLowerCase()===nombre.toLowerCase())){toast('Ya existe otro tipo con ese nombre',true);return;}
+    await updateDoc(doc(db,'inv_tipos',id),{nombre,emoji});
+    t.nombre=nombre; t.emoji=emoji;
+    tipoEditandoId=null;
+    renderTipos(); poblarSelectTipo(); renderInventario(); renderResumen(); renderInvFiltroChips();
+    toast('✓ Tipo actualizado');
   }
 
   window.agregarTipo=async function(){
