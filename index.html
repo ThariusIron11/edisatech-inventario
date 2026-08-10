@@ -560,8 +560,8 @@
         <div class="autocomplete-list" id="entLocList"></div>
       </div>
 
-      <p class="field-label">Cantidad</p>
-      <input type="number" id="entCantidad" min="1" value="1" />
+      <p class="field-label" id="entCantidadLabel">Cantidad</p>
+      <input type="number" id="entCantidad" min="1" step="1" value="1" />
 
       <p class="field-label">Observación de esta entrada (opcional)</p>
       <input type="text" id="entObs" placeholder="Ej: Llegaron de Edisatech Mosquera" style="margin-bottom:6px;" />
@@ -595,8 +595,8 @@
         <div class="autocomplete-list" id="salLocList"></div>
       </div>
 
-      <p class="field-label">Cantidad</p>
-      <input type="number" id="salCantidad" min="1" value="1" />
+      <p class="field-label" id="salCantidadLabel">Cantidad</p>
+      <input type="number" id="salCantidad" min="1" step="1" value="1" />
 
       <button type="button" class="btn-sm" style="background:#1b2a1b;color:#fff;margin-top:12px;padding:10px 14px;width:100%;" onclick="agregarSalidaALista()">➕ Agregar a la lista</button>
 
@@ -655,8 +655,8 @@
         <div class="autocomplete-list" id="trasLocDestinoList"></div>
       </div>
 
-      <p class="field-label">Cantidad</p>
-      <input type="number" id="trasCantidad" min="1" value="1" />
+      <p class="field-label" id="trasCantidadLabel">Cantidad</p>
+      <input type="number" id="trasCantidad" min="1" step="1" value="1" />
 
       <p class="field-label">Observación de este traslado (opcional)</p>
       <input type="text" id="trasObs" placeholder="Ej: Se reubicó para dejar espacio en B1" style="margin-bottom:6px;" />
@@ -793,8 +793,8 @@
           <input type="text" id="catLoc" placeholder="Escribe o elige la localización..." autocomplete="off" oninput="onInputCatLoc()" onfocus="onInputCatLoc()" />
           <div class="autocomplete-list" id="catLocList"></div>
         </div>
-        <p class="field-label">Cantidad inicial disponible</p>
-        <input type="number" id="catCantidad" class="no-spinner" min="0" value="0" />
+        <p class="field-label" id="catCantidadLabel">Cantidad inicial disponible</p>
+        <input type="number" id="catCantidad" class="no-spinner" min="0" step="1" value="0" />
         <p class="field-label">Peso en kg (opcional)</p>
         <input type="number" id="catPeso" class="no-spinner" min="0" step="0.01" placeholder="Ej: 12.5" />
         <p class="field-label">Observación (opcional)</p>
@@ -9099,6 +9099,21 @@
     renderModalPedido();
   }
 
+  // Si el tipo elegido es Cadena, la cantidad se mide en metros y puede llevar decimales
+  // (ej: 12.5 m); para cualquier otro tipo la cantidad sigue siendo unidades enteras (min 1,
+  // salvo en el catálogo donde el mínimo es 0 porque se puede registrar sin stock inicial).
+  function actualizarUnidadCantidadSegunTipo(tipoInputId,cantidadInputId,labelId,minEntero){
+    const tipoTxt=document.getElementById(tipoInputId)?.value.trim().toLowerCase()||'';
+    const tipoObj=tipos.find(t=>t.nombre.toLowerCase()===tipoTxt);
+    const inputCant=document.getElementById(cantidadInputId);
+    const label=document.getElementById(labelId);
+    if(!inputCant) return;
+    const esCadena=tipoObj?.valor==='cadena';
+    inputCant.step=esCadena?'0.01':'1';
+    inputCant.min=esCadena?'0.01':String(minEntero);
+    if(label) label.textContent=esCadena?'Cantidad (m)':(labelId==='catCantidadLabel'?'Cantidad inicial disponible':'Cantidad');
+  }
+
   window.onInputEntTipo=function(){
     const q=document.getElementById('entTipo').value.trim().toLowerCase();
     const opciones=tipos.filter(t=>t.valor!=='motoreductor'&&(!q||t.nombre.toLowerCase().includes(q)));
@@ -9107,8 +9122,10 @@
       onClick:()=>{
         document.getElementById('entTipo').value=t.nombre;
         closeAllAutocomplete();
+        actualizarUnidadCantidadSegunTipo('entTipo','entCantidad','entCantidadLabel',1);
       }
     })), 'Sin tipos que coincidan. Agrégalo en ⚙️ Config → Tipos de equipo');
+    actualizarUnidadCantidadSegunTipo('entTipo','entCantidad','entCantidadLabel',1);
   }
 
   window.onInputEntEquipo=function(){
@@ -9128,6 +9145,7 @@
         const t=tipos.find(t2=>t2.valor===eq.tipo);
         if(t) document.getElementById('entTipo').value=t.nombre;
         document.getElementById('entLoc').value=eq.localizacion;
+        actualizarUnidadCantidadSegunTipo('entTipo','entCantidad','entCantidadLabel',1);
         closeAllAutocomplete();
       }
     })), q?'Sin coincidencias — se registrará como equipo nuevo':null);
@@ -9152,7 +9170,7 @@
     const variante=document.getElementById('entVariante').value.trim();
     const locTxt=document.getElementById('entLoc').value.trim();
     const locObj=localizaciones.find(l=>etiquetaLoc(l).toLowerCase()===locTxt.toLowerCase());
-    const cantidad=parseInt(document.getElementById('entCantidad').value)||0;
+    const cantidad=parseFloat(document.getElementById('entCantidad').value)||0;
     const obs=document.getElementById('entObs').value.trim();
 
     if(!tipoObj){toast('Escribe/elige un tipo válido de la lista',true);return;}
@@ -9219,8 +9237,10 @@
       onClick:()=>{
         document.getElementById('salTipo').value=t.nombre;
         closeAllAutocomplete();
+        actualizarUnidadCantidadSegunTipo('salTipo','salCantidad','salCantidadLabel',1);
       }
     })), 'Sin tipos que coincidan. Agrégalo en ⚙️ Config → Tipos de equipo');
+    actualizarUnidadCantidadSegunTipo('salTipo','salCantidad','salCantidadLabel',1);
   }
 
   window.onInputSalEquipo=function(){
@@ -9240,6 +9260,7 @@
         const t=tipos.find(t2=>t2.valor===eq.tipo);
         if(t) document.getElementById('salTipo').value=t.nombre;
         document.getElementById('salLoc').value=eq.localizacion;
+        actualizarUnidadCantidadSegunTipo('salTipo','salCantidad','salCantidadLabel',1);
         closeAllAutocomplete();
       }
     })), q?'Sin coincidencias':null);
@@ -9325,7 +9346,7 @@
     const variante=document.getElementById('salVariante').value.trim();
     const locTxt=document.getElementById('salLoc').value.trim();
     const locObj=localizaciones.find(l=>etiquetaLoc(l).toLowerCase()===locTxt.toLowerCase());
-    const cantidad=parseInt(document.getElementById('salCantidad').value)||0;
+    const cantidad=parseFloat(document.getElementById('salCantidad').value)||0;
 
     if(!tipoObj){toast('Escribe/elige un tipo válido de la lista',true);return;}
     if(!nombreEquipo){toast('Escribe el nombre del equipo',true);return;}
@@ -9429,8 +9450,10 @@
       onClick:()=>{
         document.getElementById('trasTipo').value=t.nombre;
         closeAllAutocomplete();
+        actualizarUnidadCantidadSegunTipo('trasTipo','trasCantidad','trasCantidadLabel',1);
       }
     })), 'Sin tipos que coincidan. Agrégalo en ⚙️ Config → Tipos de equipo');
+    actualizarUnidadCantidadSegunTipo('trasTipo','trasCantidad','trasCantidadLabel',1);
   }
 
   window.onInputTrasEquipo=function(){
@@ -9450,6 +9473,7 @@
         const t=tipos.find(t2=>t2.valor===eq.tipo);
         if(t) document.getElementById('trasTipo').value=t.nombre;
         document.getElementById('trasLocOrigen').value=eq.localizacion;
+        actualizarUnidadCantidadSegunTipo('trasTipo','trasCantidad','trasCantidadLabel',1);
         closeAllAutocomplete();
       }
     })), q?'Sin coincidencias — un traslado necesita un equipo que ya exista en el inventario':null);
@@ -9474,7 +9498,7 @@
 
     const locDestinoTxt=document.getElementById('trasLocDestino').value.trim();
     const locDestinoObj=localizaciones.find(l=>etiquetaLoc(l).toLowerCase()===locDestinoTxt.toLowerCase());
-    const cantidad=parseInt(document.getElementById('trasCantidad').value)||0;
+    const cantidad=parseFloat(document.getElementById('trasCantidad').value)||0;
     const obs=document.getElementById('trasObs').value.trim();
 
     if(!locDestinoObj){toast('Escribe/elige una localización de destino válida de la lista',true);return;}
@@ -9540,11 +9564,13 @@
     if(m.tipo!=='entrada'){toast('Por ahora solo se pueden editar movimientos de entrada',true);return;}
     if(m.noEditable){toast('Este movimiento (separar/unir ZD) no se puede editar',true);return;}
     if(!movDentroDeVentanaEdicion(m)){toast(`Ya pasaron ${HORAS_LIMITE_EDITAR_ENTRADA}h desde esta entrada, no se puede editar`,true);return;}
+    const eqDelMov=equipos.find(e=>e.id===m.equipoId);
+    const esCadena=eqDelMov?.tipo==='cadena';
     document.getElementById('modalTitulo').textContent='Editar entrada';
     document.getElementById('modalSub').textContent=`${m.equipoNombre} · ${formatFecha(m.fecha)}`;
     document.getElementById('modalContenido').innerHTML=`
-      <p class="sub-label">Cantidad</p>
-      <input type="number" id="editMovCantidad" min="1" value="${m.cantidad}" style="margin-bottom:10px;"/>
+      <p class="sub-label">Cantidad${esCadena?' (m)':''}</p>
+      <input type="number" id="editMovCantidad" min="${esCadena?'0.01':'1'}" step="${esCadena?'0.01':'1'}" value="${m.cantidad}" style="margin-bottom:10px;"/>
       <p class="sub-label">Observación</p>
       <input type="text" id="editMovObs" value="${m.observacion||''}" placeholder="Sin observación" style="margin-bottom:14px;"/>
       <button class="btn-secondary" style="text-align:center;" onclick="guardarEdicionMovimiento('${id}')">💾 Guardar cambios</button>
@@ -9557,7 +9583,7 @@
     const m=movimientos.find(x=>x.id===id);
     if(!m) return;
     if(!movDentroDeVentanaEdicion(m)){toast(`Ya pasaron ${HORAS_LIMITE_EDITAR_ENTRADA}h desde esta entrada, no se puede editar`,true);document.getElementById('modalOverlay').classList.add('hidden');return;}
-    const nuevaCantidad=parseInt(document.getElementById('editMovCantidad').value)||0;
+    const nuevaCantidad=parseFloat(document.getElementById('editMovCantidad').value)||0;
     const nuevaObs=document.getElementById('editMovObs').value.trim();
     if(nuevaCantidad<=0){toast('Cantidad inválida',true);return;}
 
@@ -12141,10 +12167,12 @@
         closeAllAutocomplete();
         actualizarVisibilidadCatCompuesto();
         actualizarCatUsaSerialSegunTipo();
+        actualizarUnidadCantidadSegunTipo('catTipo','catCantidad','catCantidadLabel',0);
       }
     })), 'Sin tipos que coincidan. Agrégalo arriba en Tipos de equipo');
     actualizarVisibilidadCatCompuesto();
     actualizarCatUsaSerialSegunTipo();
+    actualizarUnidadCantidadSegunTipo('catTipo','catCantidad','catCantidadLabel',0);
   }
 
   // Si el tipo elegido es Motor o Reductor, el equipo SIEMPRE maneja serial individual: se marca
@@ -12287,7 +12315,7 @@
     const variante=document.getElementById('catVariante').value.trim();
     const locTxt=document.getElementById('catLoc').value.trim();
     const locObj=localizaciones.find(l=>etiquetaLoc(l).toLowerCase()===locTxt.toLowerCase());
-    const cantidad=parseInt(document.getElementById('catCantidad').value)||0;
+    const cantidad=parseFloat(document.getElementById('catCantidad').value)||0;
     const pesoTxt=document.getElementById('catPeso').value.trim();
     const peso=pesoTxt?parseFloat(pesoTxt):null;
     const obs=document.getElementById('catObs').value.trim();
@@ -12316,6 +12344,7 @@
     document.getElementById('catObs').value='';
     document.getElementById('catUsaSerial').checked=false;
     actualizarCatUsaSerialSegunTipo();
+    actualizarUnidadCantidadSegunTipo('catTipo','catCantidad','catCantidadLabel',0);
   }
 
   window.onInputFiltroCatTipo=function(){
