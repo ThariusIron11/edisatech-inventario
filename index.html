@@ -3950,6 +3950,7 @@
   }
 
   window.guardarCambiosEquipo=async function(id){
+    const eqActual=equipos.find(e=>e.id===id);
     const nombre=document.getElementById('editNombreEq').value.trim();
     const tipoTxt=document.getElementById('editTipoEq').value.trim();
     const tipoObj=tipos.find(t=>t.nombre.toLowerCase()===tipoTxt.toLowerCase());
@@ -3975,6 +3976,26 @@
     await updateDoc(doc(db,'inv_equipos',id),{
       nombre, tipo:tipoObj.valor, localizacion:etiquetaLoc(locObj), variante, peso, observacion:obs, usaSerial
     });
+
+    // Si el peso cambió, ofrece igualarlo en las demás localizaciones del MISMO equipo:
+    // mismo nombre, mismo tipo Y misma variante (comparando sin importar mayúsculas/espacios).
+    // Así, equipos con variantes distintas (u otra base) nunca se ven afectados entre sí, pero
+    // dos localizaciones de la misma variante sí se pueden igualar.
+    const pesoAnterior=eqActual?.peso??null;
+    const varianteNorm=variante.trim().toLowerCase();
+    if(pesoAnterior!==peso){
+      const hermanos=equipos.filter(e=>e.id!==id
+        && e.nombre.toLowerCase()===nombre.toLowerCase()
+        && e.tipo===tipoObj.valor
+        && (e.variante||'').trim().toLowerCase()===varianteNorm);
+      if(hermanos.length>0 && confirm(`Este equipo también está en ${hermanos.length} otra${hermanos.length!==1?'s':''} localización${hermanos.length!==1?'es':''}${variante?` con la variante "${variante}"`:' sin variante'}. ¿Aplicar el mismo peso (${peso??'sin definir'} kg) a esa${hermanos.length!==1?'s':''} también?`)){
+        await Promise.all(hermanos.map(h=>updateDoc(doc(db,'inv_equipos',h.id),{peso})));
+        toast(`✓ Cambios guardados y peso igualado en ${hermanos.length} localización${hermanos.length!==1?'es':''} más`);
+        document.getElementById('modalOverlay').classList.add('hidden');
+        return;
+      }
+    }
+
     toast('✓ Cambios guardados');
     document.getElementById('modalOverlay').classList.add('hidden');
   }
