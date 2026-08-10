@@ -9944,7 +9944,7 @@
           <input type="text" id="editTipoEmoji_${t.id}" value="${t.emoji||''}" maxlength="4" style="margin:0;width:56px;flex:none;text-align:center;" />
           <input type="text" id="editTipoNombre_${t.id}" value="${t.nombre}" style="margin:0;flex:1;min-width:120px;" onkeydown="if(event.key==='Enter')guardarTipo('${t.id}')" />
           <button class="btn-sm" style="background:#1b2a1b;color:#fff;" onclick="guardarTipo('${t.id}')">Guardar</button>
-          <button class="btn-sm" style="background:#eee;color:#555;" onclick="tipoEditandoId=null;renderTipos();">Cancelar</button>
+          <button class="btn-sm" style="background:#eee;color:#555;" onclick="cancelarEdicionTipo()">Cancelar</button>
         </div>`;
       }
       return `<div class="config-item">
@@ -9952,7 +9952,7 @@
         ${t.protegido
           ?'<span style="font-size:11px;color:#aaa;margin-left:auto;">🔒 permanente</span>'
           :`<div style="margin-left:auto;display:flex;gap:6px;">
-              <button class="btn-sm" style="background:#eee;color:#333;" onclick="tipoEditandoId='${t.id}';renderTipos();">✏️ Editar</button>
+              <button class="btn-sm" style="background:#eee;color:#333;" onclick="iniciarEdicionTipo('${t.id}')">✏️ Editar</button>
               <button class="btn-danger" onclick="eliminarTipo('${t.id}')">✕</button>
             </div>`}
       </div>`;
@@ -9962,6 +9962,8 @@
   // Solo permite editar nombre/emoji de un tipo NO permanente; el "valor" (slug interno con el
   // que los equipos guardan su tipo) nunca cambia, así que renombrar no rompe nada existente.
   let tipoEditandoId=null;
+  window.iniciarEdicionTipo=function(id){ tipoEditandoId=id; renderTipos(); }
+  window.cancelarEdicionTipo=function(){ tipoEditandoId=null; renderTipos(); }
   window.guardarTipo=async function(id){
     const t=tipos.find(x=>x.id===id);
     if(!t||t.protegido){toast('Este tipo es permanente',true);return;}
