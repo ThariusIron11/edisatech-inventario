@@ -3651,6 +3651,7 @@
   }
 
   window.guardarCambiosEquipoCompuesto=async function(id){
+    const eqActual=equipos.find(e=>e.id===id);
     const nombre=document.getElementById('editNombreEqComp').value.trim();
     if(!nombre){toast('El nombre no puede quedar vacío',true);return;}
     if(editPartesTemp.length===0){toast('Agrega al menos una pieza que componga este acople',true);return;}
@@ -3658,6 +3659,8 @@
     if(duplicado){toast('Ya existe otro acople compuesto con ese nombre',true);return;}
     const minimoAcoples=parseInt(document.getElementById('editMinimoAcoples')?.value)||0;
     await updateDoc(doc(db,'inv_equipos',id),{nombre, partes:editPartesTemp, minimoAcoples});
+    if(eqActual) Object.assign(eqActual,{nombre, partes:editPartesTemp, minimoAcoples});
+    renderInventario(); renderResumen(); renderCatalogoEquipos(); renderRadar(); renderRadarAlertas(); renderPendientesAsignar();
     toast('✓ Cambios guardados');
     document.getElementById('modalOverlay').classList.add('hidden');
   }
@@ -3976,6 +3979,11 @@
     await updateDoc(doc(db,'inv_equipos',id),{
       nombre, tipo:tipoObj.valor, localizacion:etiquetaLoc(locObj), variante, peso, observacion:obs, usaSerial
     });
+    // Actualiza la copia local YA, en vez de esperar a que llegue el evento de Firestore —
+    // así el cambio se ve reflejado al instante en Inventario/Resumen/Catálogo/Radar, sin
+    // depender de la latencia de red ni tener que refrescar la página (F5).
+    if(eqActual) Object.assign(eqActual,{nombre, tipo:tipoObj.valor, localizacion:etiquetaLoc(locObj), variante, peso, observacion:obs, usaSerial});
+    renderInventario(); renderResumen(); renderCatalogoEquipos(); renderRadar(); renderRadarAlertas(); renderPendientesAsignar();
 
     // Si el peso cambió, ofrece igualarlo en las demás localizaciones del MISMO equipo:
     // mismo nombre, mismo tipo Y misma variante (comparando sin importar mayúsculas/espacios).
@@ -3990,6 +3998,8 @@
         && (e.variante||'').trim().toLowerCase()===varianteNorm);
       if(hermanos.length>0 && confirm(`Este equipo también está en ${hermanos.length} otra${hermanos.length!==1?'s':''} localización${hermanos.length!==1?'es':''}${variante?` con la variante "${variante}"`:' sin variante'}. ¿Aplicar el mismo peso (${peso??'sin definir'} kg) a esa${hermanos.length!==1?'s':''} también?`)){
         await Promise.all(hermanos.map(h=>updateDoc(doc(db,'inv_equipos',h.id),{peso})));
+        hermanos.forEach(h=>{h.peso=peso;});
+        renderInventario(); renderResumen(); renderCatalogoEquipos(); renderRadar(); renderRadarAlertas(); renderPendientesAsignar();
         toast(`✓ Cambios guardados y peso igualado en ${hermanos.length} localización${hermanos.length!==1?'es':''} más`);
         document.getElementById('modalOverlay').classList.add('hidden');
         return;
