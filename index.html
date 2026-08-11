@@ -1317,12 +1317,25 @@
   let pedidoAddEjeSolidoTexto='';
   let pedidoAddOrdenCompraTexto='';
   let pedidoAddQtyVal='1';
+  // Estado del bloque especial "Set Sprocket" dentro de "Agregar equipo al pedido" — no es un
+  // tipo de catálogo real, es una forma de armar el pedido eligiendo 2 sprockets sueltos
+  // (y opcionalmente una caja de cadena) que ya existen como equipos individuales en Catálogo.
+  let pedidoAddSprocket1Id=null;
+  let pedidoAddSprocket1Texto='';
+  let pedidoAddSprocket2Id=null;
+  let pedidoAddSprocket2Texto='';
+  let pedidoAddTieneCajaCadenaChecked=false;
+  let pedidoAddCajaCadenaId=null;
+  let pedidoAddCajaCadenaTexto='';
   function limpiarFormularioAgregarPedido(){
     pedidoAddEquipoId=null; pedidoAddMotorId=null; pedidoAddReductorId=null; pedidoAddBrazoId=null; pedidoAddEjeSolidoId=null;
     pedidoAddTipoVal=''; pedidoAddEquipoTexto=''; pedidoAddMotorTexto=''; pedidoAddReductorTexto='';
     pedidoAddTieneBrazoChecked=false; pedidoAddBrazoTexto='';
     pedidoAddTieneEjeSolidoChecked=false; pedidoAddEjeSolidoTexto='';
     pedidoAddOrdenCompraTexto=''; pedidoAddQtyVal='1';
+    pedidoAddSprocket1Id=null; pedidoAddSprocket1Texto='';
+    pedidoAddSprocket2Id=null; pedidoAddSprocket2Texto='';
+    pedidoAddTieneCajaCadenaChecked=false; pedidoAddCajaCadenaId=null; pedidoAddCajaCadenaTexto='';
   }
   // Estas dos funciones permiten que cada pestaña de pedido (tab_1, tab_2...) tenga su propio
   // borrador del formulario "Agregar equipo" — se guarda al salir de una pestaña y se restaura
@@ -1343,7 +1356,14 @@
       ejeSolidoTexto:document.getElementById('pedidoAddEjeSolido')?.value??pedidoAddEjeSolidoTexto,
       ejeSolidoId:pedidoAddEjeSolidoId,
       ordenCompra:document.getElementById('pedidoAddOrdenCompra')?.value??pedidoAddOrdenCompraTexto,
-      qty:document.getElementById('pedidoAddQty')?.value??pedidoAddQtyVal
+      qty:document.getElementById('pedidoAddQty')?.value??pedidoAddQtyVal,
+      sprocket1Texto:document.getElementById('pedidoAddSprocket1')?.value??pedidoAddSprocket1Texto,
+      sprocket1Id:pedidoAddSprocket1Id,
+      sprocket2Texto:document.getElementById('pedidoAddSprocket2')?.value??pedidoAddSprocket2Texto,
+      sprocket2Id:pedidoAddSprocket2Id,
+      tieneCajaCadena:document.getElementById('pedidoAddTieneCajaCadena')?.checked??pedidoAddTieneCajaCadenaChecked,
+      cajaCadenaTexto:document.getElementById('pedidoAddCajaCadena')?.value??pedidoAddCajaCadenaTexto,
+      cajaCadenaId:pedidoAddCajaCadenaId
     };
   }
   function restaurarDraftFormularioAgregarPedido(draft){
@@ -1363,6 +1383,13 @@
     pedidoAddEjeSolidoId=draft.ejeSolidoId||null;
     pedidoAddOrdenCompraTexto=draft.ordenCompra||'';
     pedidoAddQtyVal=draft.qty||'1';
+    pedidoAddSprocket1Texto=draft.sprocket1Texto||'';
+    pedidoAddSprocket1Id=draft.sprocket1Id||null;
+    pedidoAddSprocket2Texto=draft.sprocket2Texto||'';
+    pedidoAddSprocket2Id=draft.sprocket2Id||null;
+    pedidoAddTieneCajaCadenaChecked=!!draft.tieneCajaCadena;
+    pedidoAddCajaCadenaTexto=draft.cajaCadenaTexto||'';
+    pedidoAddCajaCadenaId=draft.cajaCadenaId||null;
   }
   let asignarComponenteId=null;
   // ══════════ SIMULACIÓN DE ENVÍO (calculadora de peso a futuro, sin remesa/remisión/transportador) ══════════
@@ -1411,6 +1438,8 @@
     {valor:'acople',   nombre:'Acople',   emoji:'🔗', bg:'#fff8e1', color:'#e65100', protegido:true},
     {valor:'piezas_acople', nombre:'Piezas de Acople', emoji:'🧷', bg:'#fffde7', color:'#9e7d0a', protegido:true},
     {valor:'cadena',   nombre:'Cadena',   emoji:'⛓️', bg:'#f3e5f5', color:'#6a1b9a', protegido:true},
+    {valor:'sprocket', nombre:'Sprocket', emoji:'🦷', bg:'#e0f7fa', color:'#00695c', protegido:true},
+    {valor:'caja_cadena', nombre:'Caja de cadena', emoji:'⛓️', bg:'#efebe9', color:'#4e342e', protegido:true},
     {valor:'motor_zd', nombre:'Motor ZD', emoji:'🔌', bg:'#e1f5fe', color:'#01579b', protegido:true},
     {valor:'reductor_zd', nombre:'Reductor ZD', emoji:'🔧', bg:'#fce4ec', color:'#ad1457', protegido:true},
     {valor:'motoreductor_zd', nombre:'Motoreductor ZD', emoji:'🧲', bg:'#e0f2f1', color:'#00695c', protegido:true},
@@ -7592,6 +7621,12 @@
           const puedeRetirar=(item.despachado||0)===0;
           const filaSeries=(!esNuevo&&pedidoSerieAbierta.has(i))?renderFilaSeriesPedido(item,i,pedidoActual.id,completo||(esReparacion&&item.deReparacion),completo):'';
           const btnSeries=(!esNuevo&&itemUsaSeries(item))?`<button class="btn-sm" style="background:#e3f2fd;color:#1565c0;white-space:nowrap;" onclick="toggleSerieItemPedido(${i})">🔢 Series ${pedidoSerieAbierta.has(i)?'▲':'▼'}</button>`:'';
+          // Encabezado agrupador: se muestra antes de la primera línea de cada "set" (ej: Set
+          // Sprocket) — sus 2-3 componentes son ítems normales e independientes, solo se ven
+          // agrupados visualmente por compartir grupoSetId.
+          const grupoHeader=(item.grupoSetId&&(pedidoActual.items||[])[i-1]?.grupoSetId!==item.grupoSetId)
+            ?`<tr class="grupo-set-header"><td colspan="6" style="background:#e0f7fa;color:#00695c;font-weight:700;font-size:12px;padding:6px 10px;border-radius:8px 8px 0 0;">${item.grupoSetLabel||'🔗 Set'}</td></tr>`:'';
+          const enGrupo=!!item.grupoSetId;
 
           if(esMR){
             // Ítem "🆕 NUEVO": combina la pieza original (sin costo de stock, seguía en item[otraParte])
@@ -7724,7 +7759,7 @@
                 :((ocPropiaLone||ocOriginalHeredada)?`<br/><span style="font-size:14px;color:#777;">🧾 OC: ${ocPropiaLone||ocOriginalHeredada}</span>`:''))
             :(ocOriginalLone?`<br/><span style="font-size:14px;color:#777;">🧾 OC: ${ocOriginalLone}</span>`:(item.deReparacion?'':(item.ordenCompra?`<br/><span style="font-size:14px;color:#777;">🧾 OC: ${item.ordenCompra}</span>`:'')));
           const tieneArmadoLone=(item.unidades||[]).some(u=>u.armado);
-          return `<tr${tieneArmadoLone?' style="background:#fffde7;"':''}>
+          return `${grupoHeader}<tr${enGrupo?' style="background:#f1fbfb;border-left:3px solid #00acc1;"':(tieneArmadoLone?' style="background:#fffde7;"':'')}>
             <td class="equipo-col"><strong>${item.reemplazoDeReparacion?'<span style="color:#6a1b9a;">🆕 NUEVO · </span>':''}${item.compuesto?'🔗 ':''}${itemTieneDevolucion(item)?'↩️ ':''}<span style="${itemTieneDevolucion(item)?'color:#1565c0;':''}">${item.equipoNombre}</span></strong>${itemTieneDevolucion(item)?`<span style="font-size:11px;color:#1565c0;font-weight:700;"> (${cantidadDevueltaDeItem(item)} devuelta${cantidadDevueltaDeItem(item)===1?'':'s'})</span>`:''}<br/>${item.compuesto
                 ?(item.partes||[]).map(p=>{
                     const necesario=(p.cantidad||0)*(item.cantidad||1);
@@ -7787,11 +7822,11 @@
         </div>
         <div id="pedidoAddSectionBody" style="display:${pedidoAddSectionAbierta?'block':'none'};">
         <div class="autocomplete-wrap" style="margin-bottom:8px;">
-          <input type="text" id="pedidoAddTipoTexto" placeholder="Escribe o elige el tipo..." autocomplete="off" value="${tipos.find(t=>t.valor===pedidoAddTipoVal)?.nombre||''}" oninput="onInputPedidoAddTipo()" onfocus="onInputPedidoAddTipo()" onblur="onBlurPedidoAddTipo()" />
+          <input type="text" id="pedidoAddTipoTexto" placeholder="Escribe o elige el tipo..." autocomplete="off" value="${(pedidoAddTipoVal==='set_sprocket'?TIPO_SET_SPROCKET:tipos.find(t=>t.valor===pedidoAddTipoVal))?.nombre||''}" oninput="onInputPedidoAddTipo()" onfocus="onInputPedidoAddTipo()" onblur="onBlurPedidoAddTipo()" />
           <div class="autocomplete-list" id="pedidoAddTipoList"></div>
         </div>
         <input type="hidden" id="pedidoAddTipo" value="${pedidoAddTipoVal}" />
-        <div id="pedidoAddEquipoNormal" style="display:${pedidoAddTipoVal==='motoreductor'?'none':'block'};">
+        <div id="pedidoAddEquipoNormal" style="display:${(pedidoAddTipoVal==='motoreductor'||pedidoAddTipoVal==='set_sprocket')?'none':'block'};">
           <div class="autocomplete-wrap">
             <input type="text" id="pedidoAddEquipo" placeholder="Escribe el nombre del equipo..." autocomplete="off" value="${pedidoAddEquipoTexto}" oninput="onInputPedidoAddEquipo()" onfocus="onInputPedidoAddEquipo()" style="margin-bottom:8px;" />
             <div class="autocomplete-list" id="pedidoAddEquipoList"></div>
@@ -7825,6 +7860,27 @@
             <div class="autocomplete-wrap">
               <input type="text" id="pedidoAddEjeSolido" placeholder="Eje sólido: sin asignar (opcional)" autocomplete="off" value="${pedidoAddEjeSolidoTexto}" oninput="onInputPedidoAddEjeSolido()" onfocus="onInputPedidoAddEjeSolido()" style="margin-bottom:8px;" />
               <div class="autocomplete-list" id="pedidoAddEjeSolidoList"></div>
+            </div>
+          </div>
+        </div>
+        <div id="pedidoAddSetSprocket" style="display:${pedidoAddTipoVal==='set_sprocket'?'block':'none'};">
+          <p style="font-size:11px;color:#aaa;margin-bottom:6px;">Se arma con 2 sprockets sueltos del inventario (y opcionalmente una caja de cadena). Cada uno queda como línea propia del pedido, agrupada bajo "Set Sprocket".</p>
+          <div class="autocomplete-wrap">
+            <input type="text" id="pedidoAddSprocket1" placeholder="🦷 Sprocket 1..." autocomplete="off" value="${pedidoAddSprocket1Texto}" oninput="onInputPedidoAddSprocket1()" onfocus="onInputPedidoAddSprocket1()" style="margin-bottom:8px;" />
+            <div class="autocomplete-list" id="pedidoAddSprocket1List"></div>
+          </div>
+          <div class="autocomplete-wrap">
+            <input type="text" id="pedidoAddSprocket2" placeholder="🦷 Sprocket 2..." autocomplete="off" value="${pedidoAddSprocket2Texto}" oninput="onInputPedidoAddSprocket2()" onfocus="onInputPedidoAddSprocket2()" style="margin-bottom:8px;" />
+            <div class="autocomplete-list" id="pedidoAddSprocket2List"></div>
+          </div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#555;margin-bottom:8px;cursor:pointer;">
+            <input type="checkbox" id="pedidoAddTieneCajaCadena" onchange="onToggleTieneCajaCadena()" ${pedidoAddTieneCajaCadenaChecked?'checked':''} style="width:auto;margin:0;" />
+            ⛓️ Este set lleva caja de cadena
+          </label>
+          <div id="pedidoAddCajaCadenaWrap" style="display:${pedidoAddTieneCajaCadenaChecked?'block':'none'};">
+            <div class="autocomplete-wrap">
+              <input type="text" id="pedidoAddCajaCadena" placeholder="⛓️ Caja de cadena..." autocomplete="off" value="${pedidoAddCajaCadenaTexto}" oninput="onInputPedidoAddCajaCadena()" onfocus="onInputPedidoAddCajaCadena()" style="margin-bottom:8px;" />
+              <div class="autocomplete-list" id="pedidoAddCajaCadenaList"></div>
             </div>
           </div>
         </div>
@@ -8229,9 +8285,13 @@
     renderModalPedido();
   }
 
+  // Opción especial dentro del selector de tipo de "Agregar equipo al pedido": no es un tipo de
+  // catálogo real (no aparece en Config > Tipos, ni en Inventario/Entrada), es solo una forma de
+  // armar el pedido combinando 2 sprockets sueltos (+ opcional caja de cadena) en varias líneas.
+  const TIPO_SET_SPROCKET={valor:'set_sprocket', nombre:'Set Sprocket', emoji:'🔗🦷'};
   window.onInputPedidoAddTipo=function(){
     const q=document.getElementById('pedidoAddTipoTexto').value.trim().toLowerCase();
-    const opciones=tipos.filter(t=>!q||t.nombre.toLowerCase().includes(q));
+    const opciones=[TIPO_SET_SPROCKET,...tipos].filter(t=>!q||t.nombre.toLowerCase().includes(q));
     renderAutocompleteList(document.getElementById('pedidoAddTipoList'), opciones.map(t=>({
       label:`${t.emoji||''} ${t.nombre}`,
       onClick:()=>seleccionarPedidoAddTipo(t.valor,t.nombre)
@@ -8251,13 +8311,13 @@
   window.onBlurPedidoAddTipo=function(){
     setTimeout(()=>{
       const txt=document.getElementById('pedidoAddTipoTexto')?.value.trim().toLowerCase()||'';
-      const match=tipos.find(t=>t.nombre.toLowerCase()===txt);
+      const match=[TIPO_SET_SPROCKET,...tipos].find(t=>t.nombre.toLowerCase()===txt);
       if(match){
         if(document.getElementById('pedidoAddTipo').value!==match.valor) seleccionarPedidoAddTipo(match.valor,match.nombre);
       } else if(!txt){
         document.getElementById('pedidoAddTipo').value='';
       } else {
-        const actual=tipos.find(t=>t.valor===document.getElementById('pedidoAddTipo').value);
+        const actual=[TIPO_SET_SPROCKET,...tipos].find(t=>t.valor===document.getElementById('pedidoAddTipo').value);
         document.getElementById('pedidoAddTipoTexto').value=actual?.nombre||'';
       }
     },150);
@@ -8266,10 +8326,13 @@
   window.onCambioTipoAgregarPedido=function(){
     const tipo=document.getElementById('pedidoAddTipo')?.value;
     const esMR=tipo==='motoreductor';
+    const esSetSprocket=tipo==='set_sprocket';
     const divNormal=document.getElementById('pedidoAddEquipoNormal');
     const divMR=document.getElementById('pedidoAddMotoreductor');
-    if(divNormal) divNormal.style.display=esMR?'none':'block';
+    const divSetSprocket=document.getElementById('pedidoAddSetSprocket');
+    if(divNormal) divNormal.style.display=(esMR||esSetSprocket)?'none':'block';
     if(divMR) divMR.style.display=esMR?'block':'none';
+    if(divSetSprocket) divSetSprocket.style.display=esSetSprocket?'block':'none';
     if(esMR){
       const inM=document.getElementById('pedidoAddMotor'); if(inM) inM.value='';
       const inR=document.getElementById('pedidoAddReductor'); if(inR) inR.value='';
@@ -8280,6 +8343,13 @@
       const chkE=document.getElementById('pedidoAddTieneEjeSolido'); if(chkE) chkE.checked=false;
       const wrapE=document.getElementById('pedidoAddEjeSolidoWrap'); if(wrapE) wrapE.style.display='none';
       pedidoAddMotorId=null; pedidoAddReductorId=null; pedidoAddBrazoId=null; pedidoAddEjeSolidoId=null;
+    } else if(esSetSprocket){
+      const in1=document.getElementById('pedidoAddSprocket1'); if(in1) in1.value='';
+      const in2=document.getElementById('pedidoAddSprocket2'); if(in2) in2.value='';
+      const inC=document.getElementById('pedidoAddCajaCadena'); if(inC) inC.value='';
+      const chkC=document.getElementById('pedidoAddTieneCajaCadena'); if(chkC) chkC.checked=false;
+      const wrapC=document.getElementById('pedidoAddCajaCadenaWrap'); if(wrapC) wrapC.style.display='none';
+      pedidoAddSprocket1Id=null; pedidoAddSprocket2Id=null; pedidoAddCajaCadenaId=null; pedidoAddTieneCajaCadenaChecked=false;
     } else {
       filtrarEquiposPedido();
     }
@@ -8365,9 +8435,65 @@
     })), 'Sin reductores que coincidan');
   }
 
+  window.onInputPedidoAddSprocket1=function(){
+    pedidoAddSprocket1Id=null;
+    const q=document.getElementById('pedidoAddSprocket1').value.trim().toLowerCase();
+    const candidatos=equipos.filter(e=>e.tipo==='sprocket'&&(!q||e.nombre.toLowerCase().includes(q)||e.variante?.toLowerCase().includes(q)))
+      .sort((a,b)=>(b.disponible||0)-(a.disponible||0));
+    renderAutocompleteList(document.getElementById('pedidoAddSprocket1List'), candidatos.slice(0,30).map(e=>({
+      label:`<strong>${nombreConVariante(e)}</strong><small>${e.localizacion} · ${e.disponible||0} disp</small>`,
+      onClick:()=>{
+        document.getElementById('pedidoAddSprocket1').value=nombreConVariante(e);
+        pedidoAddSprocket1Id=e.id;
+        closeAllAutocomplete();
+      }
+    })), 'Sin sprockets que coincidan');
+  }
+
+  window.onInputPedidoAddSprocket2=function(){
+    pedidoAddSprocket2Id=null;
+    const q=document.getElementById('pedidoAddSprocket2').value.trim().toLowerCase();
+    const candidatos=equipos.filter(e=>e.tipo==='sprocket'&&(!q||e.nombre.toLowerCase().includes(q)||e.variante?.toLowerCase().includes(q)))
+      .sort((a,b)=>(b.disponible||0)-(a.disponible||0));
+    renderAutocompleteList(document.getElementById('pedidoAddSprocket2List'), candidatos.slice(0,30).map(e=>({
+      label:`<strong>${nombreConVariante(e)}</strong><small>${e.localizacion} · ${e.disponible||0} disp</small>`,
+      onClick:()=>{
+        document.getElementById('pedidoAddSprocket2').value=nombreConVariante(e);
+        pedidoAddSprocket2Id=e.id;
+        closeAllAutocomplete();
+      }
+    })), 'Sin sprockets que coincidan');
+  }
+
+  window.onToggleTieneCajaCadena=function(){
+    const checked=!!document.getElementById('pedidoAddTieneCajaCadena')?.checked;
+    const wrapC=document.getElementById('pedidoAddCajaCadenaWrap');
+    if(wrapC) wrapC.style.display=checked?'block':'none';
+    if(!checked){
+      const inC=document.getElementById('pedidoAddCajaCadena'); if(inC) inC.value='';
+      pedidoAddCajaCadenaId=null;
+    }
+  }
+
+  window.onInputPedidoAddCajaCadena=function(){
+    pedidoAddCajaCadenaId=null;
+    const q=document.getElementById('pedidoAddCajaCadena').value.trim().toLowerCase();
+    const candidatos=equipos.filter(e=>e.tipo==='caja_cadena'&&(!q||e.nombre.toLowerCase().includes(q)||e.variante?.toLowerCase().includes(q)))
+      .sort((a,b)=>(b.disponible||0)-(a.disponible||0));
+    renderAutocompleteList(document.getElementById('pedidoAddCajaCadenaList'), candidatos.slice(0,30).map(e=>({
+      label:`<strong>${nombreConVariante(e)}</strong><small>${e.localizacion} · ${e.disponible||0} disp</small>`,
+      onClick:()=>{
+        document.getElementById('pedidoAddCajaCadena').value=nombreConVariante(e);
+        pedidoAddCajaCadenaId=e.id;
+        closeAllAutocomplete();
+      }
+    })), 'Sin cajas de cadena que coincidan');
+  }
+
   window.agregarItemPedido=async function(){
     const tipoSel=document.getElementById('pedidoAddTipo')?.value;
     if(tipoSel==='motoreductor'){ return agregarMotoreductorPedido(); }
+    if(tipoSel==='set_sprocket'){ return agregarSetSprocketPedido(); }
 
     const eqId=pedidoAddEquipoId;
     const qty=parseInt(document.getElementById('pedidoAddQty')?.value)||1;
@@ -8560,6 +8686,64 @@
     renderModalPedido();
     const faltantes=[!motorEq?'motor':null,!reductorEq?'reductor':null,(tieneBrazo&&!brazoEq)?'brazo de reacción':null,(tieneEjeSolido&&!ejeSolidoEq)?'eje sólido':null].filter(Boolean);
     toast('✓ Motoreductor agregado'+(faltantes.length?' — falta asignar '+faltantes.join(', '):''));
+  }
+
+  // Agregar un "Set Sprocket" al pedido: no es una receta fija de catálogo (como el acople
+  // compuesto), se arma libremente cada vez eligiendo 2 sprockets sueltos del inventario y,
+  // opcionalmente, una caja de cadena. Cada componente elegido se agrega como una línea NORMAL
+  // del pedido (misma reserva de stock, mismo manejo de despacho/devolución/movimientos que
+  // cualquier equipo), solo que las 2-3 líneas comparten un grupoSetId para mostrarse agrupadas
+  // visualmente bajo un encabezado "Set Sprocket" en la tabla de equipos del pedido.
+  window.agregarSetSprocketPedido=async function(){
+    const qty=parseInt(document.getElementById('pedidoAddQty')?.value)||1;
+    if(qty<=0){toast('Cantidad inválida',true);return;}
+    const sp1=pedidoAddSprocket1Id?equipos.find(e=>e.id===pedidoAddSprocket1Id):null;
+    const sp2=pedidoAddSprocket2Id?equipos.find(e=>e.id===pedidoAddSprocket2Id):null;
+    if(!sp1||!sp2){toast('Elige Sprocket 1 y Sprocket 2 de la lista',true);return;}
+    const tieneCaja=!!document.getElementById('pedidoAddTieneCajaCadena')?.checked;
+    const cajaEq=tieneCaja?(pedidoAddCajaCadenaId?equipos.find(e=>e.id===pedidoAddCajaCadenaId):null):null;
+    if(tieneCaja&&!cajaEq){toast('Elige la caja de cadena de la lista, o desmarca la opción',true);return;}
+    const ordenCompra=document.getElementById('pedidoAddOrdenCompra')?.value.trim()||'';
+    const grupoSetId='set_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+
+    async function construirComponente(eq,rol){
+      const nuevoItem={
+        equipoId:eq.id, equipoNombre:`${rol} · ${nombreConVariante(eq)}`, equipoTipo:eq.tipo,
+        localizacion:eq.localizacion, cantidad:qty, despachado:0, ordenCompra, usaSerial:!!eq.usaSerial,
+        grupoSetId, grupoSetLabel:'🔗🦷 Set Sprocket', grupoSetRol:rol
+      };
+      if(tipoUsaSeries(eq.tipo)||eq.usaSerial){
+        nuevoItem.unidades=Array.from({length:qty},()=>crearUnidadVacia(false));
+      }
+      if(pedidoActual.id){
+        const cubrir=Math.min(qty,eq.disponible||0);
+        if(cubrir>0){
+          await updateDoc(doc(db,'inv_equipos',eq.id),{
+            disponible:increment(-cubrir),
+            reservado:increment(cubrir)
+          });
+        }
+        nuevoItem.cubierto=cubrir;
+      }
+      return nuevoItem;
+    }
+
+    const nuevosItems=[await construirComponente(sp1,'Sprocket 1'), await construirComponente(sp2,'Sprocket 2')];
+    if(tieneCaja) nuevosItems.push(await construirComponente(cajaEq,'Caja de cadena'));
+
+    const faltantes=nuevosItems.filter(it=>(it.cubierto??Math.min(qty,equipos.find(e=>e.id===it.equipoId)?.disponible||0))<qty);
+
+    if(pedidoActual.id){
+      const updItems=[...(pedidoActual.items||[]),...nuevosItems];
+      await updateDoc(doc(db,'inv_pedidos',pedidoActual.id),{items:updItems});
+      pedidoActual.items=updItems;
+    } else {
+      pedidoActual.items.push(...nuevosItems);
+    }
+    pedidoAddSprocket1Id=null; pedidoAddSprocket2Id=null; pedidoAddCajaCadenaId=null;
+    limpiarFormularioAgregarPedido();
+    renderModalPedido();
+    toast('✓ Set Sprocket agregado'+(faltantes.length?' — parte del stock quedó pendiente de asignar':''));
   }
 
   window.guardarNuevoPedido=async function(){
