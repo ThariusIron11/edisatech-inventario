@@ -763,6 +763,16 @@
       </div>
       <input type="search" id="buscarTipos" placeholder="Buscar tipo..." style="margin-bottom:10px;" oninput="renderTipos()" />
       <div id="listaTipos" style="display:flex;flex-direction:column;gap:8px;"><p class="loading">Cargando...</p></div>
+
+      <p class="sub-label" style="margin-top:22px;">Reasignar equipos a otro tipo</p>
+      <p style="font-size:12px;color:#888;margin-bottom:10px;">Cambia de una vez el tipo de TODOS los equipos que tengan un tag por otro ya existente. Útil para fusionar un tag mal usado (ej: "Rodamiento" → "Rodamiento excéntrico").</p>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+        <select id="reasignarTipoDesde" style="flex:1;min-width:150px;margin:0;" onchange="onCambioReasignarTipo()"></select>
+        <span style="color:#888;">→</span>
+        <select id="reasignarTipoHacia" style="flex:1;min-width:150px;margin:0;" onchange="onCambioReasignarTipo()"></select>
+      </div>
+      <p id="reasignarTipoConteo" style="font-size:12px;color:#555;margin-bottom:10px;"></p>
+      <button class="btn-sm" style="background:#1b2a1b;color:#fff;" onclick="reasignarTipoEquipos()">🔄 Reasignar equipos</button>
     </div>
 
     <div class="config-subpanel" id="configsub-catalogo">
@@ -10039,6 +10049,18 @@
         tipos.map(t=>`<option value="${t.valor}">${t.emoji||''} ${t.nombre}</option>`).join('');
       sel.value=val;
     });
+    // Selects de "Reasignar equipos a otro tipo" (sin opción vacía, siempre debe haber un tipo
+    // elegido). Solo se muestran tipos NO permanentes: los permanentes (Motor, Reductor, Cadena,
+    // Acople, etc.) tienen lógica especial propia y no deberían fusionarse/reasignarse así.
+    ['reasignarTipoDesde','reasignarTipoHacia'].forEach(id=>{
+      const sel=document.getElementById(id);
+      if(!sel) return;
+      const val=sel.value;
+      sel.innerHTML=tipos.filter(t=>!t.protegido).slice().sort((a,b)=>a.nombre.localeCompare(b.nombre))
+        .map(t=>`<option value="${t.valor}">${t.emoji||''} ${t.nombre}</option>`).join('');
+      if(val&&tipos.some(t=>t.valor===val&&!t.protegido)) sel.value=val;
+    });
+    onCambioReasignarTipo();
   }
 
   window.renderTipos=function(){
@@ -10095,9 +10117,20 @@
     const nombre=inputNombre.value.trim();
     const emoji=inputEmoji.value.trim()||'🏷️';
     if(!nombre){toast('Escribe un nombre de tipo',true);return;}
-    const valor=slugTipo(nombre);
+    // El duplicado se compara por el NOMBRE actual, no por el identificador interno ("valor"):
+    // un tipo renombrado conserva su valor viejo para no romper los equipos que ya lo tenían, así
+    // que su nombre anterior queda libre para poder reutilizarse en un tipo nuevo.
+    if(tipos.find(t=>t.nombre.toLowerCase()===nombre.toLowerCase())){toast('Ya existe un tipo con ese nombre',true);return;}
+    let valor=slugTipo(nombre);
     if(!valor){toast('Nombre inválido',true);return;}
-    if(tipos.find(t=>t.valor===valor)){toast('Ya existe ese tipo',true);return;}
+    // Si ese identificador interno ya está en uso por otro tipo (justamente el caso de un tipo
+    // renombrado que dejó "libre" su nombre viejo pero conservó su valor), se le agrega un
+    // sufijo para que cada tipo tenga siempre un identificador único internamente.
+    if(tipos.find(t=>t.valor===valor)){
+      let n=2;
+      while(tipos.find(t=>t.valor===`${valor}_${n}`)) n++;
+      valor=`${valor}_${n}`;
+    }
     const usados=tipos.length-TIPOS_BASE.filter(b=>tipos.find(t=>t.valor===b.valor)).length;
     const paleta=PALETA_TIPOS[usados%PALETA_TIPOS.length];
     const datosTipo={valor,nombre,emoji,bg:paleta.bg,color:paleta.color,protegido:false};
@@ -10119,6 +10152,44 @@
     const idx=tipos.findIndex(x=>x.id===id);
     if(idx!==-1){ tipos.splice(idx,1); renderTipos(); poblarSelectTipo(); }
     toast('✓ Tipo eliminado');
+  }
+
+  // ── REASIGNAR EQUIPOS A OTRO TIPO (Config → Tipos de equipo) ──
+  // Cambia en bloque el tipo de TODOS los equipos que tengan un tag por otro tag ya existente
+  // (por ejemplo, fusionar "Rodamiento" dentro de "Rodamiento excéntrico"). No borra ningún
+  // equipo, solo les cambia el campo tipo.
+  window.onCambioReasignarTipo=function(){
+    const desde=document.getElementById('reasignarTipoDesde')?.value;
+    const hacia=document.getElementById('reasignarTipoHacia')?.value;
+    const conteoEl=document.getElementById('reasignarTipoConteo');
+    if(!conteoEl) return;
+    if(!desde||!hacia){conteoEl.textContent='';return;}
+    if(desde===hacia){conteoEl.textContent='⚠️ Elige dos tipos distintos';return;}
+    const n=equipos.filter(e=>e.tipo===desde).length;
+    const nombreDesde=tipos.find(t=>t.valor===desde)?.nombre||desde;
+    const nombreHacia=tipos.find(t=>t.valor===hacia)?.nombre||hacia;
+    conteoEl.textContent=n>0
+      ?`${n} equipo${n!==1?'s':''} con el tag "${nombreDesde}" pasará${n!==1?'n':''} a "${nombreHacia}"`
+      :`No hay equipos con el tag "${nombreDesde}"`;
+  }
+
+  window.reasignarTipoEquipos=async function(){
+    const desde=document.getElementById('reasignarTipoDesde')?.value;
+    const hacia=document.getElementById('reasignarTipoHacia')?.value;
+    if(!desde||!hacia){toast('Elige ambos tipos',true);return;}
+    if(desde===hacia){toast('Elige dos tipos distintos',true);return;}
+    const afectados=equipos.filter(e=>e.tipo===desde);
+    if(afectados.length===0){toast('No hay equipos con ese tipo',true);return;}
+    const nombreDesde=tipos.find(t=>t.valor===desde)?.nombre||desde;
+    const nombreHacia=tipos.find(t=>t.valor===hacia)?.nombre||hacia;
+    if(!confirm(`¿Cambiar el tipo de ${afectados.length} equipo${afectados.length!==1?'s':''} de "${nombreDesde}" a "${nombreHacia}"?\n\nEsta acción no se puede deshacer.`)) return;
+    // Si el tipo destino es Motor o Reductor, esos equipos SIEMPRE manejan serial individual.
+    const forzarSerial=tipoTieneSerialFijo(hacia);
+    await Promise.all(afectados.map(e=>updateDoc(doc(db,'inv_equipos',e.id), forzarSerial?{tipo:hacia,usaSerial:true}:{tipo:hacia})));
+    afectados.forEach(e=>{ e.tipo=hacia; if(forzarSerial) e.usaSerial=true; });
+    renderInventario(); renderResumen(); renderCatalogoEquipos(); renderRadar(); renderRadarAlertas(); renderInvFiltroChips(); renderGruposPeso();
+    toast(`✓ ${afectados.length} equipo${afectados.length!==1?'s':''} reasignado${afectados.length!==1?'s':''} a "${nombreHacia}"`);
+    onCambioReasignarTipo();
   }
 
   function poblarSelectLoc(){
