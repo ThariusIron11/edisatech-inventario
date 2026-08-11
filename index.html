@@ -1388,6 +1388,8 @@
   const pedidosExpandidos=new Set();
   let invFiltroTipos=[]; // valores de tipo activos como filtro en Inventario
   let invFiltroSede=''; // '' = todas las sedes
+  let sinStockFiltroTipos=[]; // filtro de tipo dentro de la ficha "Sin stock"
+  let sinStockFiltroSede=''; // filtro de sede dentro de la ficha "Sin stock"
   let tiposSeedIntentado=false;
   let motoreductorMigrado=false;
   let motovibradorMigrado=false;
@@ -3270,15 +3272,93 @@
   // ver siempre en su ficha de localización aunque estén en 0. Como un equipo en 0 no tiene
   // stock físico en ningún lado, tampoco se muestra su localización en la tarjeta.
   window.abrirFichaSinStock=function(){
-    const eqs=equipos.filter(e=>e.tipo!=='acople'&&(e.disponible||0)===0)
-      .sort((a,b)=>(a.localizacion||'').localeCompare(b.localizacion||'')||a.nombre.localeCompare(b.nombre));
+    sinStockFiltroTipos=[];
+    sinStockFiltroSede='';
     document.getElementById('modalTitulo').textContent='🔴 Sin stock';
-    document.getElementById('modalSub').textContent=`${eqs.length} referencia${eqs.length!==1?'s':''} con 0 disponibles`;
-    document.getElementById('modalContenido').innerHTML=eqs.length>0
-      ?eqs.map(eq=>tarjetaEquipoInventario(eq,undefined,true)).join('')
-      :'<p class="empty-msg">Todo tiene stock 🎉</p>';
+    document.getElementById('modalSub').textContent='';
+    document.getElementById('modalContenido').innerHTML=`
+      <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input type="search" id="sinStockBuscar" placeholder="Buscar equipo o tipo..." oninput="renderFichaSinStock()" />
+      </div>
+      <div class="autocomplete-wrap" style="margin-top:10px;">
+        <input type="text" id="sinStockFiltroTipoInput" placeholder="+ Filtrar por tipo..." autocomplete="off" oninput="onInputSinStockFiltroTipo()" onfocus="onInputSinStockFiltroTipo()" />
+        <div class="autocomplete-list" id="sinStockFiltroTipoList"></div>
+      </div>
+      <div id="sinStockFiltroTipoChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>
+      <select id="sinStockFiltroSede" style="margin-top:10px;" onchange="renderFichaSinStock()">
+        <option value="">🏢 Todas las sedes</option>
+      </select>
+      <div id="sinStockLista" style="margin-top:14px;"></div>
+    `;
+    const selSede=document.getElementById('sinStockFiltroSede');
+    const sedes=[...new Set(localizaciones.map(l=>l.sede).filter(Boolean))].sort();
+    selSede.innerHTML='<option value="">🏢 Todas las sedes</option>'+sedes.map(s=>`<option value="${s}">${s}</option>`).join('');
     document.querySelector('#modalOverlay .modal-box')?.classList.remove('modal-box-mitad');
     document.getElementById('modalOverlay').classList.remove('hidden');
+    renderFichaSinStock();
+  }
+
+  // Re-renderiza solo la lista de la ficha "Sin stock" según búsqueda + filtro de tipo + sede,
+  // igual que renderInventario pero acotado siempre al universo de equipos con 0 disponibles.
+  window.renderFichaSinStock=function(){
+    const busq=(document.getElementById('sinStockBuscar')?.value||'').toLowerCase();
+    sinStockFiltroSede=document.getElementById('sinStockFiltroSede')?.value||'';
+    let eqs=equipos.filter(e=>e.tipo!=='acople'&&(e.disponible||0)===0);
+    if(sinStockFiltroTipos.length>0) eqs=eqs.filter(e=>sinStockFiltroTipos.includes(e.tipo));
+    if(sinStockFiltroSede) eqs=eqs.filter(e=>sedeDeEquipo(e)===sinStockFiltroSede);
+    if(busq) eqs=eqs.filter(e=>{
+      const t=tipos.find(x=>x.valor===e.tipo);
+      return e.nombre.toLowerCase().includes(busq)
+        || e.variante?.toLowerCase().includes(busq)
+        || t?.nombre.toLowerCase().includes(busq);
+    });
+    eqs.sort((a,b)=>(a.localizacion||'').localeCompare(b.localizacion||'')||a.nombre.localeCompare(b.nombre));
+    const modalSub=document.getElementById('modalSub');
+    if(modalSub) modalSub.textContent=`${eqs.length} referencia${eqs.length!==1?'s':''} con 0 disponibles`;
+    const cont=document.getElementById('sinStockLista');
+    if(!cont) return;
+    cont.innerHTML=eqs.length>0
+      ?eqs.map(eq=>tarjetaEquipoInventario(eq,undefined,true)).join('')
+      :'<p class="empty-msg">Nada coincide 🔍</p>';
+  }
+
+  window.onInputSinStockFiltroTipo=function(){
+    const q=document.getElementById('sinStockFiltroTipoInput').value.trim().toLowerCase();
+    const opciones=tipos.filter(t=>t.valor!=='acople'&&!sinStockFiltroTipos.includes(t.valor)&&(!q||t.nombre.toLowerCase().includes(q)));
+    renderAutocompleteList(document.getElementById('sinStockFiltroTipoList'), opciones.map(t=>({
+      label:`${t.emoji||''} ${t.nombre}`,
+      onClick:()=>{
+        sinStockFiltroTipos.push(t.valor);
+        document.getElementById('sinStockFiltroTipoInput').value='';
+        closeAllAutocomplete();
+        renderSinStockFiltroChips();
+        renderFichaSinStock();
+      }
+    })), q?'Sin tipos que coincidan':(opciones.length===0?'Ya filtraste por todos los tipos':null));
+  }
+
+  window.renderSinStockFiltroChips=function(){
+    const cont=document.getElementById('sinStockFiltroTipoChips');
+    if(!cont) return;
+    if(sinStockFiltroTipos.length===0){cont.innerHTML='';return;}
+    cont.innerHTML=sinStockFiltroTipos.map(v=>{
+      const t=tipos.find(x=>x.valor===v);
+      if(!t) return '';
+      return `<span class="badge" style="background:${t.bg};color:${t.color};cursor:pointer;" onclick="quitarSinStockFiltroTipo('${v}')">${t.emoji||''} ${t.nombre} ✕</span>`;
+    }).join('')+(sinStockFiltroTipos.length>1?`<span class="badge" style="background:#eee;color:#666;cursor:pointer;" onclick="limpiarSinStockFiltroTipos()">Limpiar filtros</span>`:'');
+  }
+
+  window.quitarSinStockFiltroTipo=function(v){
+    sinStockFiltroTipos=sinStockFiltroTipos.filter(x=>x!==v);
+    renderSinStockFiltroChips();
+    renderFichaSinStock();
+  }
+
+  window.limpiarSinStockFiltroTipos=function(){
+    sinStockFiltroTipos=[];
+    renderSinStockFiltroChips();
+    renderFichaSinStock();
   }
 
   // Ficha de un tipo de equipo: se abre desde "Por tipo" en el Resumen del inventario y
