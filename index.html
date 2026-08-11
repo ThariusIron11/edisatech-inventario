@@ -761,8 +761,11 @@
         <input type="text" id="nuevoTipoNombre" placeholder="Ej: Rodamiento" style="margin:0;" />
         <button class="btn-sm" style="background:#1b2a1b;color:#fff;white-space:nowrap;" onclick="agregarTipo()">+ Agregar</button>
       </div>
-      <input type="search" id="buscarTipos" placeholder="Buscar tipo..." style="margin-bottom:10px;" oninput="renderTipos()" />
-      <div id="listaTipos" style="display:flex;flex-direction:column;gap:8px;"><p class="loading">Cargando...</p></div>
+      <input type="search" id="buscarTipos" placeholder="Buscar tipo..." style="margin-bottom:10px;" oninput="tiposPagina=0;renderTipos()" />
+      <button class="btn-secondary" id="btnToggleListaTipos" style="margin-bottom:10px;text-align:center;" onclick="toggleListaTipos()">🙈 Ocultar tags</button>
+      <div id="listaTiposWrap">
+        <div id="listaTipos" style="display:flex;flex-direction:column;gap:8px;"><p class="loading">Cargando...</p></div>
+      </div>
 
       <p class="sub-label" style="margin-top:22px;">Reasignar equipos a otro tipo</p>
       <p style="font-size:12px;color:#888;margin-bottom:10px;">Cambia de una vez el tipo de TODOS los equipos que tengan un tag por otro ya existente. Útil para fusionar un tag mal usado (ej: "Rodamiento" → "Rodamiento excéntrico").</p>
@@ -1485,6 +1488,10 @@
   // ── PAGINACIÓN CATÁLOGO (Config) ──
   let catalogoPagina=0;
   const CATALOGO_POR_PAG=20;
+
+  // ── PAGINACIÓN TIPOS DE EQUIPO (Config) ──
+  let tiposPagina=0;
+  const TIPOS_POR_PAG=15;
 
   // ── PAGINACIÓN EMPRESAS (Config) ──
   let empresasPagina=0;
@@ -10063,6 +10070,17 @@
     onCambioReasignarTipo();
   }
 
+  window.irPaginaTipos=function(p){tiposPagina=p;renderTipos();}
+
+  window.toggleListaTipos=function(){
+    const wrap=document.getElementById('listaTiposWrap');
+    if(!wrap) return;
+    const abierto=wrap.style.display!=='none';
+    wrap.style.display=abierto?'none':'block';
+    const btn=document.getElementById('btnToggleListaTipos');
+    if(btn) btn.textContent=abierto?'👁️ Mostrar tags':'🙈 Ocultar tags';
+  }
+
   window.renderTipos=function(){
     const lista=document.getElementById('listaTipos');
     if(!lista) return;
@@ -10070,7 +10088,14 @@
     const busq=(document.getElementById('buscarTipos')?.value||'').trim().toLowerCase();
     const tiposFiltrados=busq?tipos.filter(t=>t.nombre.toLowerCase().includes(busq)):tipos;
     if(tiposFiltrados.length===0){lista.innerHTML='<p class="empty-msg">Sin tipos que coincidan</p>';return;}
-    lista.innerHTML=tiposFiltrados.map(t=>{
+
+    const total=tiposFiltrados.length;
+    const totalPags=Math.max(1,Math.ceil(total/TIPOS_POR_PAG));
+    if(tiposPagina>=totalPags) tiposPagina=0;
+    const inicio=tiposPagina*TIPOS_POR_PAG;
+    const tiposPag=tiposFiltrados.slice(inicio,inicio+TIPOS_POR_PAG);
+
+    let html=tiposPag.map(t=>{
       const enEdicion=tipoEditandoId===t.id;
       if(enEdicion){
         return `<div class="config-item" style="flex-wrap:wrap;gap:8px;">
@@ -10090,6 +10115,17 @@
             </div>`}
       </div>`;
     }).join('');
+
+    if(totalPags>1){
+      html+='<div style="display:flex;gap:6px;justify-content:center;margin-top:8px;flex-wrap:wrap;">';
+      for(let i=0;i<totalPags;i++){
+        const act=i===tiposPagina;
+        html+=`<button onclick="irPaginaTipos(${i})" style="width:34px;height:34px;border-radius:10px;border:1.5px solid ${act?'#1b2a1b':'#d8e4d8'};background:${act?'#1b2a1b':'#f7f9f7'};color:${act?'#fff':'#1b2a1b'};font-weight:700;font-size:13px;cursor:pointer;">${i+1}</button>`;
+      }
+      html+=`<p style="width:100%;text-align:center;font-size:11px;color:#aaa;margin-top:4px;">Mostrando ${inicio+1}–${Math.min(inicio+TIPOS_POR_PAG,total)} de ${total}</p></div>`;
+    }
+
+    lista.innerHTML=html;
   }
 
   // Solo permite editar nombre/emoji de un tipo NO permanente; el "valor" (slug interno con el
