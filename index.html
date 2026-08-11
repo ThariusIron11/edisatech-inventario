@@ -1426,6 +1426,8 @@
   let motorZdMigrado=false;
   let reductorZdMigrado=false;
   let motoreductorZdMigrado=false;
+  let sprocketMigrado=false;
+  let cajaCadenaMigrado=false;
 
   // ── TIPOS DE EQUIPO BASE (permanentes, no se pueden eliminar) ──
   const TIPOS_BASE=[
@@ -2961,6 +2963,18 @@
     if(!snap.empty&&!snap.docs.some(d=>d.data().valor==='motoreductor_zd')&&!motoreductorZdMigrado){
       motoreductorZdMigrado=true;
       await addDoc(collection(db,'inv_tipos'),TIPOS_BASE.find(t=>t.valor==='motoreductor_zd'));
+      return;
+    }
+    // Migración: instalaciones ya existentes que no tengan aún el tipo "sprocket"
+    if(!snap.empty&&!snap.docs.some(d=>d.data().valor==='sprocket')&&!sprocketMigrado){
+      sprocketMigrado=true;
+      await addDoc(collection(db,'inv_tipos'),TIPOS_BASE.find(t=>t.valor==='sprocket'));
+      return;
+    }
+    // Migración: instalaciones ya existentes que no tengan aún el tipo "caja_cadena" (Caja de cadena)
+    if(!snap.empty&&!snap.docs.some(d=>d.data().valor==='caja_cadena')&&!cajaCadenaMigrado){
+      cajaCadenaMigrado=true;
+      await addDoc(collection(db,'inv_tipos'),TIPOS_BASE.find(t=>t.valor==='caja_cadena'));
       return;
     }
     tipos=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>{
