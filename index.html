@@ -3421,9 +3421,10 @@
     // tienen sede, y no se pueden mezclar piezas de sedes distintas (son bodegas separadas). Por
     // eso su disponibilidad se calcula y se muestra en un cuadro POR SEDE, no en uno solo global.
     // Además, dentro de cada ficha de localización se ocultan los equipos con 0 disponibles
-    // (ya no hay stock físico ahí) EXCEPTO los de tipo "acople", que se dejan ver aunque estén
-    // en 0 porque son piezas de referencia que igual conviene ver en su ubicación.
-    const equiposParaPaginar=equiposFiltrados.filter(e=>!e.compuesto&&(e.tipo==='acople'||(e.disponible||0)>0));
+    // Y 0 reservados (ya no hay nada de ese equipo ahí, ni físico ni comprometido) EXCEPTO los
+    // de tipo "acople", que se dejan ver siempre aunque estén en 0 porque son piezas de
+    // referencia que igual conviene ver en su ubicación.
+    const equiposParaPaginar=equiposFiltrados.filter(e=>!e.compuesto&&(e.tipo==='acople'||(e.disponible||0)>0||Math.max(0,e.reservado||0)>0));
 
     // Agrupa TODOS los equipos filtrados (sin paginar todavía) por localización, para poder
     // paginar por ubicaciones completas más abajo y que una misma ubicación nunca quede
