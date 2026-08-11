@@ -728,6 +728,7 @@
       <button class="subtab-btn active" onclick="switchConfigSubtab('localizaciones')">📍 Localizaciones</button>
       <button class="subtab-btn" onclick="switchConfigSubtab('tipos')">🏷️ Tipos de equipo</button>
       <button class="subtab-btn" onclick="switchConfigSubtab('catalogo')">📋 Catálogo</button>
+      <button class="subtab-btn" onclick="switchConfigSubtab('pesos')">⚖️ Igualar pesos</button>
       <button class="subtab-btn" onclick="switchConfigSubtab('empresas')">🏢 Empresas</button>
       <button class="subtab-btn" onclick="switchConfigSubtab('envios')">🚚 Envíos</button>
       <button class="subtab-btn" onclick="switchConfigSubtab('tecnicos')">🔧 Técnicos</button>
@@ -833,6 +834,16 @@
         <input type="hidden" id="filtroCatTipo" value="" />
       </div>
       <div id="catalogoEquipos"><p class="loading">Cargando...</p></div>
+    </div>
+
+    <div class="config-subpanel" id="configsub-pesos">
+      <p class="app-sub" style="text-align:left;margin-bottom:14px;">Agrupa equipos por mismo nombre + mismo tipo + misma variante (ignorando mayúsculas y espacios de más) y revisa si tienen pesos distintos entre sus localizaciones, para igualarlos con un clic.</p>
+      <input type="search" id="buscarGruposPeso" placeholder="Buscar equipo..." style="margin-bottom:10px;" oninput="renderGruposPeso()" />
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#555;margin-bottom:14px;cursor:pointer;">
+        <input type="checkbox" id="soloDiferentesPeso" checked onchange="renderGruposPeso()" style="width:auto;margin:0;" />
+        Mostrar solo grupos con pesos diferentes
+      </label>
+      <div id="listaGruposPeso"><p class="loading">Cargando...</p></div>
     </div>
 
     <div class="config-subpanel" id="configsub-empresas">
@@ -1444,12 +1455,13 @@
   // Para agregar una nueva sección a Config en el futuro: 1) agregar su nombre aquí,
   // 2) agregar el botón .subtab-btn en el HTML de #configSubtabs,
   // 3) agregar el div.config-subpanel con id="configsub-<nombre>"
-  const CONFIG_SUBTABS=['localizaciones','tipos','catalogo','empresas','envios','tecnicos','sesion'];
+  const CONFIG_SUBTABS=['localizaciones','tipos','catalogo','pesos','empresas','envios','tecnicos','sesion'];
   window.switchConfigSubtab=function(sub){
     CONFIG_SUBTABS.forEach((s,i)=>{
       document.getElementById('configsub-'+s)?.classList.toggle('active', s===sub);
       document.querySelectorAll('#configSubtabs .subtab-btn')[i]?.classList.toggle('active', s===sub);
     });
+    if(sub==='pesos') renderGruposPeso();
   }
 
   // ── PAGINACIÓN INVENTARIO ──
@@ -2938,7 +2950,7 @@
   });
   onSnapshot(query(collection(db,'inv_equipos'),orderBy('nombre')),snap=>{
     equipos=snap.docs.map(d=>({id:d.id,...d.data()}));
-    renderInventario(); renderResumen(); renderCatalogoEquipos(); renderRadar(); renderRadarAlertas(); renderPendientesAsignar();
+    renderInventario(); renderResumen(); renderCatalogoEquipos(); renderRadar(); renderRadarAlertas(); renderPendientesAsignar(); renderGruposPeso();
   });
   // ── LÍMITE DE HISTORIAL (pedidos / movimientos / reparaciones) ──
   // Para bajar lecturas de Firestore, estas 3 colecciones (las más pesadas) solo traen
@@ -3666,6 +3678,64 @@
     document.getElementById('modalOverlay').classList.add('hidden');
   }
 
+  // ── IGUALAR PESOS (Config → ⚖️ Igualar pesos) ──
+  // Agrupa equipos (no compuestos, que no manejan peso propio) por mismo nombre + mismo tipo +
+  // misma variante, comparando sin importar mayúsculas ni espacios de más al inicio/final. Solo
+  // interesan los grupos con más de una localización, y por defecto solo los que ya tienen
+  // pesos distintos entre sí (para no llenar la pantalla con grupos que ya están bien).
+  let gruposPesoActuales=[];
+  window.renderGruposPeso=function(){
+    const cont=document.getElementById('listaGruposPeso');
+    if(!cont) return;
+    const busq=(document.getElementById('buscarGruposPeso')?.value||'').trim().toLowerCase();
+    const soloDif=document.getElementById('soloDiferentesPeso')?.checked??true;
+    const mapa={};
+    equipos.filter(e=>!e.compuesto).forEach(e=>{
+      const clave=`${e.nombre.trim().toLowerCase()}|${e.tipo}|${(e.variante||'').trim().toLowerCase()}`;
+      if(!mapa[clave]) mapa[clave]={nombre:e.nombre,tipo:e.tipo,variante:e.variante||'',items:[]};
+      mapa[clave].items.push(e);
+    });
+    let grupos=Object.values(mapa).filter(g=>g.items.length>1);
+    if(busq) grupos=grupos.filter(g=>g.nombre.toLowerCase().includes(busq));
+    if(soloDif) grupos=grupos.filter(g=>new Set(g.items.map(e=>e.peso??null)).size>1);
+    grupos.sort((a,b)=>a.nombre.localeCompare(b.nombre));
+    gruposPesoActuales=grupos;
+    if(grupos.length===0){cont.innerHTML=`<p class="empty-msg">${soloDif?'No hay grupos con pesos diferentes 🎉':'Sin equipos con el mismo nombre en más de una localización'}</p>`;return;}
+    cont.innerHTML=grupos.map((g,i)=>{
+      const pesosUnicos=[...new Set(g.items.map(e=>e.peso??null))];
+      return `<div class="config-item" style="flex-direction:column;align-items:stretch;gap:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+          <span>${badgeHTML(g.tipo)} <strong>${g.nombre}</strong>${g.variante?` <span style="color:#4527a0;">· ${g.variante}</span>`:''}</span>
+          <span style="font-size:11px;color:#aaa;">${g.items.length} localizaciones</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:2px;">
+          ${g.items.map(e=>`<p style="font-size:12px;color:#555;display:flex;justify-content:space-between;">
+            <span>${e.localizacion}</span><span>${e.peso!=null?e.peso+' kg':'sin definir'}</span>
+          </p>`).join('')}
+        </div>
+        ${pesosUnicos.length>1
+          ?`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px;">
+              <input type="number" step="0.01" min="0" id="pesoIgualarInput_${i}" placeholder="Peso a aplicar (kg)" style="margin:0;flex:1;min-width:120px;" />
+              <button class="btn-sm" style="background:#1b2a1b;color:#fff;white-space:nowrap;" onclick="igualarPesoGrupo(${i})">⚖️ Igualar</button>
+            </div>`
+          :'<p style="font-size:11px;color:#2e7d32;">✓ Ya tienen el mismo peso</p>'}
+      </div>`;
+    }).join('');
+  }
+
+  window.igualarPesoGrupo=async function(i){
+    const g=gruposPesoActuales[i];
+    if(!g) return;
+    const pesoTxt=document.getElementById(`pesoIgualarInput_${i}`)?.value.trim()||'';
+    const peso=pesoTxt?parseFloat(pesoTxt):null;
+    if(pesoTxt&&isNaN(peso)){toast('Escribe un peso válido',true);return;}
+    if(!confirm(`¿Aplicar ${peso??'sin definir'} kg a las ${g.items.length} localizaciones de "${g.nombre}"${g.variante?` (${g.variante})`:''}?`)) return;
+    await Promise.all(g.items.map(e=>updateDoc(doc(db,'inv_equipos',e.id),{peso})));
+    g.items.forEach(e=>{e.peso=peso;});
+    renderGruposPeso(); renderInventario(); renderResumen(); renderCatalogoEquipos(); renderRadar(); renderRadarAlertas();
+    toast(`✓ Peso igualado en ${g.items.length} localización${g.items.length!==1?'es':''}`);
+  }
+
   window.abrirDetalleEquipo=function(id){
     const eq=equipos.find(e=>e.id===id);
     if(!eq) return;
@@ -3970,6 +4040,11 @@
     if(!tipoObj){toast('Escribe/elige un tipo válido de la lista',true);return;}
     if(!locObj){toast('Escribe/elige una localización válida de la lista',true);return;}
 
+    // OJO: hay que capturar el peso ANTERIOR aquí, antes de sobrescribir eqActual más abajo,
+    // porque eqActual es el mismo objeto que vive en el arreglo "equipos" — si se lee después
+    // del Object.assign ya estaría leyendo el peso nuevo y nunca detectaría el cambio.
+    const pesoAnterior=eqActual?.peso??null;
+
     const duplicado=equipos.find(e=>e.id!==id
       && e.nombre.toLowerCase()===nombre.toLowerCase()
       && e.tipo===tipoObj.valor
@@ -3990,7 +4065,6 @@
     // mismo nombre, mismo tipo Y misma variante (comparando sin importar mayúsculas/espacios).
     // Así, equipos con variantes distintas (u otra base) nunca se ven afectados entre sí, pero
     // dos localizaciones de la misma variante sí se pueden igualar.
-    const pesoAnterior=eqActual?.peso??null;
     const varianteNorm=variante.trim().toLowerCase();
     if(pesoAnterior!==peso){
       const hermanos=equipos.filter(e=>e.id!==id
