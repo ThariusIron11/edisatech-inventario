@@ -498,7 +498,7 @@
 <div class="panel" id="panel-reparaciones">
   <div class="app-panel">
     <p class="app-title">🔧 Reparaciones</p>
-    <button class="btn-primary" onclick="abrirNuevaReparacion()">+ Nueva reparación</button>
+    <button class="btn-primary" onclick="abrirModalReparacionDesdeHeader()">+ Nueva reparación</button>
     <input type="search" id="buscarReparaciones" placeholder="Buscar por ID, cliente o serial..." style="margin-top:14px;" autocomplete="off" oninput="renderReparaciones();checkHistorialAutoReparaciones();" />
     <div class="subtabs" id="reparacionesFiltros" style="margin-top:14px;margin-bottom:0;">
       <button class="subtab-btn active" onclick="filtrarReparacionesEstado('')">Todos</button>
@@ -10818,6 +10818,19 @@
     return 'R-'+String(n).padStart(2,'0');
   }
 
+  // Botón "+ Nueva reparación" del panel principal: si ya hay una sesión de reparaciones abierta
+  // (cerrada por fuera del cuadro, con pestañas/borradores pendientes), la retoma tal cual en
+  // vez de descartarla creando una pestaña en blanco. Solo crea una pestaña nueva si no había
+  // ninguna sesión activa. Mismo patrón que abrirModalPedidosDesdeHeader.
+  window.abrirModalReparacionDesdeHeader=function(){
+    if(reparacionTabs.length>0){
+      document.getElementById('modalReparacion').classList.remove('hidden');
+      activarReparacionTab(reparacionTabActivaKey&&reparacionTabs.some(t=>t.key===reparacionTabActivaKey)?reparacionTabActivaKey:reparacionTabs[0].key);
+      return;
+    }
+    abrirNuevaReparacion();
+  }
+
   window.abrirNuevaReparacion=function(){
     document.getElementById('modalReparacion').classList.remove('hidden');
     const ahora=new Date();
@@ -11045,12 +11058,18 @@
   }
 
   window.cerrarModalReparacion=function(event){
+    // Clic dentro del cuadro (no en el fondo del overlay): no hace nada.
     if(event&&event.target!==event.currentTarget) return;
     document.getElementById('modalReparacion').classList.add('hidden');
-    reparacionActual=null;
-    reparacionEditandoId=null;
-    reparacionTabs=[];
-    reparacionTabActivaKey=null;
+    if(!event){
+      // Botón "✕": cierre completo — descarta todas las pestañas/borradores sin guardar.
+      reparacionActual=null;
+      reparacionEditandoId=null;
+      reparacionTabs=[];
+      reparacionTabActivaKey=null;
+    }
+    // Clic en el fondo (fuera del cuadro): solo oculta el modal, conserva reparacionActual,
+    // reparacionTabs y el borrador tal como estaban para poder retomarlos después.
   }
 
   // Nombres sugeridos para la descripción de un motor o reductor en Reparaciones:
