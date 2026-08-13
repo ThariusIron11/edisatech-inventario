@@ -7703,7 +7703,11 @@
             // "🆕 NUEVO" correspondiente.
             const ocGenerica=(item.ordenCompra&&!tieneReemplazo)?`<br/><span style="font-size:14px;color:#777;">🧾 OC: ${item.ordenCompra}</span>`:'';
             const tieneArmadoMR=(item.unidades||[]).some(u=>u.armado);
-            return `<tr${tieneArmadoMR?' style="background:#fffde7;"':''}>
+            // Encabezado agrupador con el mismo diseño visual que "Set Sprocket" — franja de color
+            // encima de la fila para identificar el motoreductor de un vistazo entre el resto de
+            // ítems del pedido, con su propio color (verde) distinto al de otros grupos.
+            const motoreductorHeader=`<tr class="grupo-set-header"><td colspan="6" style="background:#e8f5e9;color:#2e7d32;font-weight:700;font-size:12px;padding:6px 10px;border-radius:8px 8px 0 0;">🧩 Motoreductor</td></tr>`;
+            return `${motoreductorHeader}<tr style="${tieneArmadoMR?'background:#fffde7;':'background:#f4faf4;border-left:3px solid #43a047;'}">
               <td class="equipo-col"><strong>${itemTieneDevolucion(item)?'↩️ ':''}<span style="${itemTieneDevolucion(item)?'color:#1565c0;':''}">🧩 Motoreductor</span></strong>${itemTieneDevolucion(item)?`<span style="font-size:11px;color:#1565c0;font-weight:700;"> (${cantidadDevueltaDeItem(item)} devuelta${cantidadDevueltaDeItem(item)===1?'':'s'})</span>`:''}<br/>
                 <span style="font-size:15px;">⚡ ${motorAsignado?`${item.motor.equipoNombre} X ${item.cantidad} und`:'<span style="color:#e65100;">Motor sin asignar</span>'}</span><br/>
                 <span style="font-size:15px;">⚙️ ${reductorAsignado?`${item.reductor.equipoNombre} X ${item.cantidad} und`:'<span style="color:#e65100;">Reductor sin asignar</span>'}</span>
@@ -7783,7 +7787,10 @@
                 :((ocPropiaLone||ocOriginalHeredada)?`<br/><span style="font-size:14px;color:#777;">🧾 OC: ${ocPropiaLone||ocOriginalHeredada}</span>`:''))
             :(ocOriginalLone?`<br/><span style="font-size:14px;color:#777;">🧾 OC: ${ocOriginalLone}</span>`:(item.deReparacion?'':(item.ordenCompra?`<br/><span style="font-size:14px;color:#777;">🧾 OC: ${item.ordenCompra}</span>`:'')));
           const tieneArmadoLone=(item.unidades||[]).some(u=>u.armado);
-          return `${grupoHeader}<tr${enGrupo?' style="background:#f1fbfb;border-left:3px solid #00acc1;"':(tieneArmadoLone?' style="background:#fffde7;"':'')}>
+          // Mismo diseño de encabezado que "Set Sprocket" y "Motoreductor", pero con su propio
+          // color (morado) para identificar de un vistazo un acople compuesto entre el resto.
+          const compuestoHeader=(item.compuesto&&!enGrupo)?`<tr class="grupo-set-header"><td colspan="6" style="background:#ede7f6;color:#6a1b9a;font-weight:700;font-size:12px;padding:6px 10px;border-radius:8px 8px 0 0;">🔗 Acople compuesto</td></tr>`:'';
+          return `${grupoHeader}${compuestoHeader}<tr${enGrupo?' style="background:#f1fbfb;border-left:3px solid #00acc1;"':(item.compuesto?' style="background:#faf8fd;border-left:3px solid #8e5fd6;"':(tieneArmadoLone?' style="background:#fffde7;"':''))}>
             <td class="equipo-col"><strong>${item.reemplazoDeReparacion?'<span style="color:#6a1b9a;">🆕 NUEVO · </span>':''}${item.compuesto?'🔗 ':''}${itemTieneDevolucion(item)?'↩️ ':''}<span style="${itemTieneDevolucion(item)?'color:#1565c0;':''}">${item.equipoNombre}</span></strong>${itemTieneDevolucion(item)?`<span style="font-size:11px;color:#1565c0;font-weight:700;"> (${cantidadDevueltaDeItem(item)} devuelta${cantidadDevueltaDeItem(item)===1?'':'s'})</span>`:''}<br/>${item.compuesto
                 ?(item.partes||[]).map(p=>{
                     const necesario=(p.cantidad||0)*(item.cantidad||1);
