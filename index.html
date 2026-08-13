@@ -1088,14 +1088,30 @@
   // sí solo: solo se usa como respaldo cuando la pestaña estuvo realmente oculta.
   let reconectando=false;
   let ultimoReconecte=0;
-  async function reconectarFirestore(){
+  // Reintenta con backoff: en celular, al volver de segundo plano la red a veces todavía está
+  // terminando de reconectar (cambiando de wifi a datos, radio despertando) y el primer intento
+  // de enableNetwork() puede fallar. Sin reintento, Firestore se quedaba "apagado" en silencio
+  // hasta que el usuario hacía F5 — este es justo el caso reportado: celular, pestaña del
+  // navegador, 5-30 min en segundo plano.
+  async function reconectarFirestore(intentos){
+    intentos=intentos||0;
     const ahora=Date.now();
-    if(reconectando||(ahora-ultimoReconecte)<15000) return;
-    reconectando=true;
-    ultimoReconecte=ahora;
-    try{ await disableNetwork(db); await enableNetwork(db); }
-    catch(e){}
-    finally{ reconectando=false; }
+    if(intentos===0){
+      if(reconectando||(ahora-ultimoReconecte)<15000) return;
+      reconectando=true;
+      ultimoReconecte=ahora;
+    }
+    try{
+      await disableNetwork(db);
+      await enableNetwork(db);
+      reconectando=false;
+    }catch(e){
+      if(intentos<4){
+        setTimeout(()=>reconectarFirestore(intentos+1), 2000*(intentos+1));
+      } else {
+        reconectando=false;
+      }
+    }
   }
   let pestanaEstuvoOculta=false;
   document.addEventListener('visibilitychange', () => {
@@ -9031,6 +9047,21 @@
       items:updItems, remisiones, envios:enviosNuevos, estado:estadoNuevo,
       ...(todoCompleto?{fechaCompleto:serverTimestamp()}:{})
     });
+
+    // Refleja el cambio de inmediato en los datos locales (mapas + array `pedidos`), sin esperar
+    // al eco en tiempo real de Firestore — en algunas sesiones/PWA ese eco tarda o no llega hasta
+    // F5 (mismo problema ya resuelto antes para Localizaciones/Catálogo). Así "Estado de Envíos",
+    // la ficha del pedido y la Ficha de Envío pasan a "🚚 Envío en ruta" al instante.
+    const pedidoLocalActualizado={
+      ...pedido, items:updItems, remisiones, envios:enviosNuevos, estado:estadoNuevo,
+      ...(todoCompleto?{fechaCompleto:new Date()}:{})
+    };
+    if(pedidosActivosMap.has(pedido.id)) pedidosActivosMap.set(pedido.id,pedidoLocalActualizado);
+    if(pedidosRecientesMap.has(pedido.id)) pedidosRecientesMap.set(pedido.id,pedidoLocalActualizado);
+    const idxLocal=pedidos.findIndex(p=>p.id===pedido.id);
+    if(idxLocal>=0) pedidos[idxLocal]=pedidoLocalActualizado; else pedidos.push(pedidoLocalActualizado);
+    renderPedidos(); renderPendientesAsignar(); renderEstadoEnvios();
+    if(fichaEnvioIds) renderFichaEnvio();
 
     // Si este pedido viene de una reparación y ya quedó 100% despachado, la reparación
     // pasa a "completado" y desde ahí queda bloqueada para edición.
