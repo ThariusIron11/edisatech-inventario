@@ -1444,16 +1444,6 @@
   let sinStockFiltroTipos=[]; // filtro de tipo dentro de la ficha "Sin stock"
   let sinStockFiltroSede=''; // filtro de sede dentro de la ficha "Sin stock"
   let tiposSeedIntentado=false;
-  let motoreductorMigrado=false;
-  let motovibradorMigrado=false;
-  let brazoMigrado=false;
-  let ejeSolidoMigrado=false;
-  let piezasAcopleMigrado=false;
-  let motorZdMigrado=false;
-  let reductorZdMigrado=false;
-  let motoreductorZdMigrado=false;
-  let sprocketMigrado=false;
-  let cajaCadenaMigrado=false;
 
   // ── TIPOS DE EQUIPO BASE (permanentes, no se pueden eliminar) ──
   const TIPOS_BASE=[
@@ -2940,70 +2930,43 @@
   onSnapshot(collection(db,'inv_tipos'),async snap=>{
     if(snap.empty&&!tiposSeedIntentado){
       tiposSeedIntentado=true;
+      // setDoc con id determinado (=valor) en vez de addDoc: así la siembra es idempotente — si
+      // dos sesiones abren la app casi al mismo tiempo con la colección vacía, ambas escriben el
+      // MISMO documento por tipo en vez de crear duplicados con ids aleatorios.
       for(const t of TIPOS_BASE){
-        await addDoc(collection(db,'inv_tipos'),t);
+        await setDoc(doc(db,'inv_tipos',t.valor),t);
       }
       return; // el propio addDoc disparará este listener de nuevo con los datos ya sembrados
     }
-    // Migración: instalaciones ya existentes que no tengan aún el tipo "motoreductor"
-    if(!snap.empty&&!snap.docs.some(d=>d.data().valor==='motoreductor')&&!motoreductorMigrado){
-      motoreductorMigrado=true;
-      await addDoc(collection(db,'inv_tipos'),TIPOS_BASE.find(t=>t.valor==='motoreductor'));
-      return;
+    // Migraciones de tipos base añadidos después del lanzamiento inicial: si una instalación ya
+    // existente no tiene aún alguno de estos, se agrega. Usa setDoc con id=valor (idempotente) en
+    // vez de addDoc: antes, con addDoc, si dos sesiones/pestañas abrían la app casi al mismo tiempo
+    // y ambas veían el tipo ausente, cada una creaba su propio documento con id aleatorio — eso
+    // producía tipos duplicados (p. ej. "Caja de cadena" repetido cada vez que se abría el programa).
+    // Con id=valor, aunque se repita el intento, siempre se sobreescribe el mismo documento.
+    for(const t of TIPOS_BASE){
+      if(!snap.empty&&!snap.docs.some(d=>d.data().valor===t.valor)){
+        await setDoc(doc(db,'inv_tipos',t.valor),t);
+        return;
+      }
     }
-    // Migración: instalaciones ya existentes que no tengan aún el tipo "motovibrador"
-    if(!snap.empty&&!snap.docs.some(d=>d.data().valor==='motovibrador')&&!motovibradorMigrado){
-      motovibradorMigrado=true;
-      await addDoc(collection(db,'inv_tipos'),TIPOS_BASE.find(t=>t.valor==='motovibrador'));
-      return;
+    // Autolimpieza: si por el bug anterior (addDoc no idempotente) ya quedaron duplicados de un
+    // mismo tipo en Firestore, se conserva solo uno (el de id más antiguo) y se borran los demás,
+    // para que la lista de Tipos y los filtros dejen de mostrarlo repetido.
+    const porValor=new Map();
+    for(const d of snap.docs){
+      const v=d.data().valor;
+      if(!v) continue;
+      if(!porValor.has(v)) porValor.set(v,[]);
+      porValor.get(v).push(d);
     }
-    // Migración: instalaciones ya existentes que no tengan aún el tipo "brazo" (Brazo de reacción)
-    if(!snap.empty&&!snap.docs.some(d=>d.data().valor==='brazo')&&!brazoMigrado){
-      brazoMigrado=true;
-      await addDoc(collection(db,'inv_tipos'),TIPOS_BASE.find(t=>t.valor==='brazo'));
-      return;
+    for(const [,docs] of porValor){
+      if(docs.length>1){
+        docs.sort((a,b)=>a.id.localeCompare(b.id));
+        for(const dup of docs.slice(1)) deleteDoc(doc(db,'inv_tipos',dup.id)).catch(()=>{});
+      }
     }
-    // Migración: instalaciones ya existentes que no tengan aún el tipo "eje_solido" (Eje sólido)
-    if(!snap.empty&&!snap.docs.some(d=>d.data().valor==='eje_solido')&&!ejeSolidoMigrado){
-      ejeSolidoMigrado=true;
-      await addDoc(collection(db,'inv_tipos'),TIPOS_BASE.find(t=>t.valor==='eje_solido'));
-      return;
-    }
-    // Migración: instalaciones ya existentes que no tengan aún el tipo "piezas_acople" (Piezas de Acople)
-    if(!snap.empty&&!snap.docs.some(d=>d.data().valor==='piezas_acople')&&!piezasAcopleMigrado){
-      piezasAcopleMigrado=true;
-      await addDoc(collection(db,'inv_tipos'),TIPOS_BASE.find(t=>t.valor==='piezas_acople'));
-      return;
-    }
-    // Migración: instalaciones ya existentes que no tengan aún los tipos ZD (Motor/Reductor/Motoreductor ZD)
-    if(!snap.empty&&!snap.docs.some(d=>d.data().valor==='motor_zd')&&!motorZdMigrado){
-      motorZdMigrado=true;
-      await addDoc(collection(db,'inv_tipos'),TIPOS_BASE.find(t=>t.valor==='motor_zd'));
-      return;
-    }
-    if(!snap.empty&&!snap.docs.some(d=>d.data().valor==='reductor_zd')&&!reductorZdMigrado){
-      reductorZdMigrado=true;
-      await addDoc(collection(db,'inv_tipos'),TIPOS_BASE.find(t=>t.valor==='reductor_zd'));
-      return;
-    }
-    if(!snap.empty&&!snap.docs.some(d=>d.data().valor==='motoreductor_zd')&&!motoreductorZdMigrado){
-      motoreductorZdMigrado=true;
-      await addDoc(collection(db,'inv_tipos'),TIPOS_BASE.find(t=>t.valor==='motoreductor_zd'));
-      return;
-    }
-    // Migración: instalaciones ya existentes que no tengan aún el tipo "sprocket"
-    if(!snap.empty&&!snap.docs.some(d=>d.data().valor==='sprocket')&&!sprocketMigrado){
-      sprocketMigrado=true;
-      await addDoc(collection(db,'inv_tipos'),TIPOS_BASE.find(t=>t.valor==='sprocket'));
-      return;
-    }
-    // Migración: instalaciones ya existentes que no tengan aún el tipo "caja_cadena" (Caja de cadena)
-    if(!snap.empty&&!snap.docs.some(d=>d.data().valor==='caja_cadena')&&!cajaCadenaMigrado){
-      cajaCadenaMigrado=true;
-      await addDoc(collection(db,'inv_tipos'),TIPOS_BASE.find(t=>t.valor==='caja_cadena'));
-      return;
-    }
-    tipos=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>{
+    tipos=[...porValor.values()].map(docs=>({id:docs[0].id,...docs[0].data()})).sort((a,b)=>{
       if(a.protegido!==b.protegido) return a.protegido?-1:1;
       return a.nombre.localeCompare(b.nombre);
     });
