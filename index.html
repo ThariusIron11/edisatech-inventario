@@ -475,6 +475,10 @@
         <select id="filtroEmpresaEnvios" style="margin:0;flex:1;min-width:160px;" onchange="onCambioFiltroEmpresaEnvios()">
           <option value="">🚚 Todas las transportadoras</option>
         </select>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#555;white-space:nowrap;background:#fce4ec;padding:0 12px;border-radius:8px;">
+          <input type="checkbox" id="soloFaltaFacturaEnvios" onchange="onCambioSoloFaltaFacturaEnvios()" style="margin:0;" />
+          🧾 Solo falta factura
+        </label>
       </div>
       <div class="subtabs" id="estadoEnviosFiltros" style="margin-bottom:14px;">
         <button class="subtab-btn active" onclick="filtrarEstadoEnvios('')">Todos</button>
@@ -1423,6 +1427,7 @@
   let pedidosVista='lista'; // 'lista' | 'envios' — subpestaña activa dentro del panel Pedidos
   let estadoEnviosFiltro=''; // '', 'proceso', 'ruta', 'entregado' — filtra la vista "Estado de Envíos"
   let estadoEnviosFiltroEmpresa=''; // '' = todas las transportadoras
+  let estadoEnviosSoloFaltaFactura=false; // true = solo envíos ya despachados a los que aún les falta registrar factura
   let estadoEnviosOrden='desc'; // 'desc' = más recientes primero, 'asc' = más antiguos primero
   let estadoEnviosCriterioOrden='fecha'; // 'fecha' | 'nombre'
   let envioFiltroEstado=''; // '', 'proceso', 'completo' — filtra la lista de "Envíos armados" en la pestaña Envío
@@ -3539,7 +3544,7 @@
       <div style="display:flex;justify-content:space-between;align-items:flex-start;">
         <div style="flex:1;">
           <p class="equipo-inv-nombre">${eq.compuesto?'🔗 ':''}${eq.nombre}</p>
-          <div style="margin-top:4px;">${badgeHTML(eq.tipo)}${eq.compuesto||ocultarLoc?'':`<span class="badge-loc">${eq.localizacion}</span>`}${eq.variante?`<span class="badge-loc" style="background:#ede7f6;color:#4527a0;">🔸 ${eq.variante}</span>`:''}${eq.compuesto?`<span class="badge-loc" style="background:#ede7f6;color:#6a1b9a;">🔗 Compuesto</span>`:''}</div>
+          <div style="margin-top:4px;">${badgeHTML(eq.tipo)}${eq.compuesto||ocultarLoc?'':`<span class="badge-loc">${eq.localizacion}</span>`}${eq.variante?`<span class="badge-loc" style="background:#ede7f6;color:#4527a0;">🔸 ${eq.variante}</span>`:''}${eq.compuesto?`<span class="badge-loc" style="background:#ede7f6;color:#6a1b9a;">🔗 Compuesto</span>`:''}${(eq.tipo==='motor'||eq.tipo==='reductor')&&eq.peso==null?`<span class="badge-loc" style="background:#fff3e0;color:#e65100;">⚖️ Falta peso</span>`:''}</div>
           ${eq.observacion?`<p class="equipo-inv-obs">📝 ${eq.observacion}</p>`:''}
           ${eq.compuesto?`<p style="font-size:11px;color:#aaa;margin-top:4px;">${(eq.partes||[]).map(p=>`${p.nombre} X ${p.cantidad}`).join(' · ')}</p>`:''}
           ${eq.compuesto?`<p style="font-size:11px;margin-top:2px;color:${disp<(eq.minimoAcoples??5)?'#c62828':'#aaa'};">Mínimo: ${eq.minimoAcoples??5}${disp<(eq.minimoAcoples??5)?' ⚠️ por debajo del mínimo':''}</p>`:''}
@@ -6233,6 +6238,14 @@
     renderEstadoEnvios();
   }
 
+  // "Solo falta factura": acota la lista (dentro de "En proceso" / "Envío en ruta" / "Entregado" /
+  // "Todos") a los envíos ya despachados a los que aún les falta registrar la factura — el mismo
+  // criterio que ya usa el badge "🧾 Falta factura" de cada fila.
+  window.onCambioSoloFaltaFacturaEnvios=function(){
+    estadoEnviosSoloFaltaFactura=document.getElementById('soloFaltaFacturaEnvios')?.checked||false;
+    renderEstadoEnvios();
+  }
+
   // Arma la lista cruda (sin filtrar) de "filas" de Estado de Envíos: una por cada envío único,
   // agrupando remesas compartidas (vinculoId) para no repetirlas por cada pedido que las comparte.
   // Se reutiliza tanto para la lista principal como para el autocompletado del buscador.
@@ -6348,6 +6361,8 @@
         +empresasDisp.map(emp=>`<option value="${emp}" ${emp===estadoEnviosFiltroEmpresa?'selected':''}>${emp}</option>`).join('');
     }
     if(estadoEnviosFiltroEmpresa) filtradas=filtradas.filter(f=>f.empresa===estadoEnviosFiltroEmpresa);
+
+    if(estadoEnviosSoloFaltaFactura) filtradas=filtradas.filter(f=>f.despachado&&f.pendienteFactura&&(f.empresa||'').toUpperCase()!=='INTERNO');
 
     if(q) filtradas=filtradas.filter(f=>filaEstadoEnvioCoincide(f,q));
 
