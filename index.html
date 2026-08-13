@@ -401,6 +401,10 @@
     <select id="invFiltroSede" style="margin-top:10px;" onchange="onCambioFiltroSedeInv()">
       <option value="">🏢 Todas las sedes</option>
     </select>
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#555;margin-top:10px;background:#fff3e0;padding:8px 12px;border-radius:8px;">
+      <input type="checkbox" id="invSoloFaltaPeso" onchange="onCambioInvSoloFaltaPeso()" style="margin:0;" />
+      ⚖️ Solo falta peso (motor/reductor)
+    </label>
     <div style="display:flex;gap:8px;margin-top:10px;">
       <button class="btn-sm" style="background:#f7f9f7;color:#1b2a1b;flex:1;" onclick="expandirTodasLocs()">⬇️ Expandir todo</button>
       <button class="btn-sm" style="background:#f7f9f7;color:#1b2a1b;flex:1;" onclick="contraerTodasLocs()">⬆️ Contraer todo</button>
@@ -1436,6 +1440,7 @@
   const pedidosExpandidos=new Set();
   let invFiltroTipos=[]; // valores de tipo activos como filtro en Inventario
   let invFiltroSede=''; // '' = todas las sedes
+  let invSoloFaltaPeso=false; // true = solo motor/reductor con peso sin definir
   let sinStockFiltroTipos=[]; // filtro de tipo dentro de la ficha "Sin stock"
   let sinStockFiltroSede=''; // filtro de sede dentro de la ficha "Sin stock"
   let tiposSeedIntentado=false;
@@ -3582,6 +3587,8 @@
         || t?.nombre.toLowerCase().includes(busq);
     });
 
+    if(invSoloFaltaPeso) equiposFiltrados=equiposFiltrados.filter(e=>(e.tipo==='motor'||e.tipo==='reductor')&&e.peso==null);
+
     // Los acoples compuestos no tienen una sede propia: se arman con piezas sueltas que sí la
     // tienen, y no se pueden mezclar piezas de sedes distintas. Por eso se calculan antes de
     // aplicar el filtro general de sede (que para ellos se maneja aparte, mostrando un cuadro
@@ -3596,8 +3603,9 @@
     // Además, dentro de cada ficha de localización se ocultan los equipos con 0 disponibles
     // Y 0 reservados (ya no hay nada de ese equipo ahí, ni físico ni comprometido) EXCEPTO los
     // de tipo "acople", que se dejan ver siempre aunque estén en 0 porque son piezas de
-    // referencia que igual conviene ver en su ubicación.
-    const equiposParaPaginar=equiposFiltrados.filter(e=>!e.compuesto&&(e.tipo==='acople'||(e.disponible||0)>0||Math.max(0,e.reservado||0)>0));
+    // referencia que igual conviene ver en su ubicación — igual que con "Solo falta peso"
+    // activo, donde interesa ver TODO lo que falte marcar sin importar el stock actual.
+    const equiposParaPaginar=equiposFiltrados.filter(e=>!e.compuesto&&(invSoloFaltaPeso||e.tipo==='acople'||(e.disponible||0)>0||Math.max(0,e.reservado||0)>0));
 
     // Agrupa TODOS los equipos filtrados (sin paginar todavía) por localización, para poder
     // paginar por ubicaciones completas más abajo y que una misma ubicación nunca quede
@@ -3703,6 +3711,14 @@
   window.irPaginaInv=function(p){invPagina=p;renderInventario();}
   window.onCambioFiltroSedeInv=function(){
     invFiltroSede=document.getElementById('invFiltroSede')?.value||'';
+    invPagina=0;
+    renderInventario();
+  }
+
+  // "Solo falta peso": acota Inventario a equipos tipo motor/reductor sin peso definido — mismo
+  // criterio que ya usa el tag "⚖️ Falta peso" de cada tarjeta.
+  window.onCambioInvSoloFaltaPeso=function(){
+    invSoloFaltaPeso=document.getElementById('invSoloFaltaPeso')?.checked||false;
     invPagina=0;
     renderInventario();
   }
