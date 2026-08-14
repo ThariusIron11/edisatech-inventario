@@ -1213,6 +1213,16 @@
   }
   await esperarLogin();
 
+  // Reconexión forzada justo después de loguearse: el heartbeat de reconexión (línea ~1145) ya
+  // corre incluso ANTES de iniciar sesión, mientras el usuario está viendo la pantalla de login.
+  // Si ese heartbeat alcanzó a dejar la red de Firestore deshabilitada (p.ej. agotó sus reintentos
+  // por una desconexión de red en ese momento) antes de que el usuario terminara de loguearse, los
+  // listeners que se crean justo debajo arrancaban en modo "solo caché" y la app se quedaba
+  // mostrando datos viejos hasta oprimir F5. Esto garantiza que la red quede habilitada de cero
+  // justo cuando arranca la sesión, sin depender de cómo haya quedado el heartbeat previo.
+  ultimoReconecte=0; reconectando=false;
+  await enableNetwork(db).catch(()=>{});
+
   // ── CIERRE DE SESIÓN AUTOMÁTICO POR INACTIVIDAD (30 minutos) ──
   const INACTIVIDAD_LIMITE_MS=30*60*1000;
   let inactividadTimer=null;
