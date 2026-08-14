@@ -2020,6 +2020,22 @@
   }
 
   // ══════════ ENVÍO (armado de remisiones antes de despachar) ══════════
+  // Números de serie de un ítem, listos para mostrar en resumen (solo lectura) en la tabla de
+  // Equipos del pedido — se muestra debajo del nombre del equipo y arriba de la OC, solo si el
+  // ítem realmente tiene algún serial cargado (si no tiene ninguno, no se muestra nada).
+  function resumenSerialesItem(item){
+    if(!item.unidades||item.unidades.length===0) return '';
+    const esMR=item.equipoTipo==='motoreductor';
+    if(esMR){
+      const pares=item.unidades.filter(u=>u.motorSerial||u.reductorSerial)
+        .map(u=>`${u.motorSerial||'—'} / ${u.reductorSerial||'—'}`);
+      if(pares.length===0) return '';
+      return `<br/><span style="font-size:13px;color:#555;">🔢 ${pares.join(', ')}</span>`;
+    }
+    const seriales=item.unidades.filter(u=>u.serial).map(u=>u.serial);
+    if(seriales.length===0) return '';
+    return `<br/><span style="font-size:13px;color:#555;">🔢 ${seriales.join(', ')}</span>`;
+  }
   // Cantidad de un ítem "por cantidad" (no serial) que aún no se ha metido en ningún envío armado.
   function pendienteEnvioDeItem(item){
     const cant=item.cantidad||0;
@@ -7675,6 +7691,7 @@
                     <span style="font-size:15px;">⚡ ${item.motor?.equipoNombre||'-'}${item.motor?.equipoId?` X ${item.cantidad} und`:' <span style="color:#888;">(pieza original)</span>'}</span><br/>
                     <span style="font-size:15px;">⚙️ ${item.reductor?.equipoNombre||'-'}${item.reductor?.equipoId?` X ${item.cantidad} und`:' <span style="color:#888;">(pieza original)</span>'}</span>
                   </div>
+                  ${resumenSerialesItem(item)}
                   ${ocHtml}
                 </td>
                 <td>-</td>
@@ -7719,6 +7736,7 @@
                 </div>
                 ${pendStock>0&&(motorAsignado||reductorAsignado||brazoAsignado||ejeSolidoAsignado)?`<br/><span style="font-size:12px;color:#e65100;">⏳ Falta cubrir: ${pendStock}</span>`:''}
                 ${(item.unidades||[]).filter(u=>u.armado).length>0?`<br/><span style="font-size:12px;color:#f57f17;">🔧 Armadas: ${(item.unidades||[]).filter(u=>u.armado).length} de ${item.unidades.length}</span>`:''}
+                ${resumenSerialesItem(item)}
                 ${ocGenerica}
               </td>
               <td>-</td>
@@ -7791,17 +7809,21 @@
                 :((ocPropiaLone||ocOriginalHeredada)?`<br/><span style="font-size:14px;color:#777;">🧾 OC: ${ocPropiaLone||ocOriginalHeredada}</span>`:''))
             :(ocOriginalLone?`<br/><span style="font-size:14px;color:#777;">🧾 OC: ${ocOriginalLone}</span>`:(item.deReparacion?'':(item.ordenCompra?`<br/><span style="font-size:14px;color:#777;">🧾 OC: ${item.ordenCompra}</span>`:'')));
           const tieneArmadoLone=(item.unidades||[]).some(u=>u.armado);
-          // Mismo diseño de encabezado que "Set Sprocket" y "Motoreductor", pero con su propio
-          // color (morado) para identificar de un vistazo un acople compuesto entre el resto.
-          const compuestoHeader=(item.compuesto&&!enGrupo)?`<tr class="grupo-set-header"><td colspan="6" style="background:#ede7f6;color:#6a1b9a;font-weight:700;font-size:12px;padding:6px 10px;border-radius:8px 8px 0 0;">🔗 Acople compuesto</td></tr>`:'';
-          return `${grupoHeader}${compuestoHeader}<tr${enGrupo?' style="background:#f1fbfb;border-left:3px solid #00acc1;"':(item.compuesto?' style="background:#faf8fd;border-left:3px solid #8e5fd6;"':(tieneArmadoLone?' style="background:#fffde7;"':''))}>
+          // Mismo diseño de encabezado que "Set Sprocket"/"Motoreductor"/"Acople compuesto", pero
+          // aplicado a un equipo suelto normal (ej: un Motor o Reductor solo, sin set ni compuesto):
+          // usa el color propio de su tipo (el mismo que ya tiene su badge) para identificarlo de
+          // un vistazo qué tipo de equipo es.
+          const tipoObjLone=tipos.find(t=>t.valor===item.equipoTipo);
+          const compuestoHeader=(item.compuesto&&!enGrupo)?`<tr class="grupo-set-header"><td colspan="6" style="background:#ede7f6;color:#6a1b9a;font-weight:700;font-size:12px;padding:6px 10px;border-radius:8px 8px 0 0;">🔗 Acople compuesto</td></tr>`
+            :((!item.compuesto&&!enGrupo&&tipoObjLone)?`<tr class="grupo-set-header"><td colspan="6" style="background:${tipoObjLone.bg};color:${tipoObjLone.color};font-weight:700;font-size:12px;padding:6px 10px;border-radius:8px 8px 0 0;">${tipoObjLone.emoji||''} ${tipoObjLone.nombre}</td></tr>`:'');
+          return `${grupoHeader}${compuestoHeader}<tr${enGrupo?' style="background:#f1fbfb;border-left:3px solid #00acc1;"':(item.compuesto?' style="background:#faf8fd;border-left:3px solid #8e5fd6;"':(tieneArmadoLone?` style="background:#fffde7;${tipoObjLone?`border-left:3px solid ${tipoObjLone.color};`:''}"`:(tipoObjLone?` style="background:#fafafa;border-left:3px solid ${tipoObjLone.color};"`:'')))}>
             <td class="equipo-col"><strong>${item.reemplazoDeReparacion?'<span style="color:#6a1b9a;">🆕 NUEVO · </span>':''}${item.compuesto?'🔗 ':''}${itemTieneDevolucion(item)?'↩️ ':''}<span style="${itemTieneDevolucion(item)?'color:#1565c0;':''}">${item.equipoNombre}</span></strong>${itemTieneDevolucion(item)?`<span style="font-size:11px;color:#1565c0;font-weight:700;"> (${cantidadDevueltaDeItem(item)} devuelta${cantidadDevueltaDeItem(item)===1?'':'s'})</span>`:''}<br/>${item.compuesto
                 ?(item.partes||[]).map(p=>{
                     const necesario=(p.cantidad||0)*(item.cantidad||1);
                     const cubP=p.cubierto||0;
                     return `<span style="font-size:13px;">${p.nombre} X ${necesario} und${p.localizacion?` <span style="color:#999;">· ${p.localizacion}</span>`:''}${cubP<necesario?` <span style="color:#e65100;">(reservado ${cubP})</span>`:''}</span><br/>`;
                   }).join('')
-                :`<span style="font-size:12px;color:#aaa;">${badgeHTML(item.equipoTipo)}</span>`}${pendStock>0?`<br/><span style="font-size:12px;color:#e65100;">⏳ Pendiente de asignar: ${pendStock}</span>`:''}${(item.unidades||[]).filter(u=>u.armado).length>0?`<br/><span style="font-size:12px;color:#f57f17;">🔧 Armadas: ${(item.unidades||[]).filter(u=>u.armado).length} de ${item.unidades.length}</span>`:''}${ocHtmlLone}</td>
+                :(tipoObjLone?'':`<span style="font-size:12px;color:#aaa;">${badgeHTML(item.equipoTipo)}</span>`)}${pendStock>0?`<br/><span style="font-size:12px;color:#e65100;">⏳ Pendiente de asignar: ${pendStock}</span>`:''}${(item.unidades||[]).filter(u=>u.armado).length>0?`<br/><span style="font-size:12px;color:#f57f17;">🔧 Armadas: ${(item.unidades||[]).filter(u=>u.armado).length} de ${item.unidades.length}</span>`:''}${resumenSerialesItem(item)}${ocHtmlLone}</td>
             <td><span class="badge-loc">${item.localizacion||'-'}</span></td>
             <td>${item.cantidad}</td>
             <td class="qty-ok">${cub}</td>
