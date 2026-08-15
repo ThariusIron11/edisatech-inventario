@@ -9645,12 +9645,19 @@
       await updateDoc(doc(db,'inv_equipos',equipoId),{
         disponible:increment(cantidad)
       });
+      // Refleja el aumento de stock de inmediato en el array local `equipos`, sin esperar al
+      // eco de onSnapshot — mismo patrón ya aplicado antes en Localizaciones/Catálogo/Despacho,
+      // porque ese eco a veces tarda o no llega hasta F5.
+      const idxEq=equipos.findIndex(e=>e.id===equipoId);
+      if(idxEq>=0) equipos[idxEq]={...equipos[idxEq],disponible:(equipos[idxEq].disponible||0)+cantidad};
     } else {
       const ref=await addDoc(collection(db,'inv_equipos'),{
         nombre:nombreEquipo, tipo:tipoObj.valor, variante, localizacion:etiquetaLoc(locObj), disponible:cantidad, reservado:0, observacion:''
       });
       equipoId=ref.id; equipoNombre=nombreConVariante({nombre:nombreEquipo,variante});
+      equipos.push({id:equipoId, nombre:nombreEquipo, tipo:tipoObj.valor, variante, localizacion:etiquetaLoc(locObj), disponible:cantidad, reservado:0, observacion:''});
     }
+    renderInventario(); renderResumen(); renderCatalogoEquipos(); renderRadar(); renderRadarAlertas(); renderPendientesAsignar(); renderGruposPeso();
 
     await addDoc(collection(db,'inv_movimientos'),{
       tipo:'entrada', equipoId, equipoNombre, cantidad,
