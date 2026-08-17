@@ -8344,6 +8344,19 @@
   }
 
 
+  // Si el usuario escribió (o dejó escrito de antes) el nombre EXACTO de un equipo pero no lo
+  // seleccionó haciendo clic en la lista — típicamente al querer reutilizar el mismo motor/
+  // reductor/etc. que ya usó en el ítem anterior — esto lo reconoce igual en vez de exigir
+  // volver a hacer clic. Solo resuelve si hay una coincidencia EXACTA y única (nombre + variante,
+  // sin importar mayúsculas); si el texto es ambiguo, parcial o no coincide con nada, no adivina:
+  // se sigue pidiendo elegir de la lista, para no asignar el equipo equivocado por error.
+  function resolverEquipoPorTextoExacto(texto,tipoFiltro){
+    const t=(texto||'').trim().toLowerCase();
+    if(!t) return null;
+    let candidatos=equipos.filter(e=>!e.compuesto&&nombreConVariante(e).toLowerCase()===t);
+    if(tipoFiltro) candidatos=candidatos.filter(e=>e.tipo===tipoFiltro);
+    return candidatos.length===1?candidatos[0].id:null;
+  }
   window.onInputPedidoAddEquipo=function(){
     pedidoAddEquipoId=null;
     const q=document.getElementById('pedidoAddEquipo').value.trim().toLowerCase();
@@ -8596,7 +8609,7 @@
     if(tipoSel==='motoreductor'){ return agregarMotoreductorPedido(); }
     if(tipoSel==='set_sprocket'){ return agregarSetSprocketPedido(); }
 
-    const eqId=pedidoAddEquipoId;
+    const eqId=pedidoAddEquipoId||resolverEquipoPorTextoExacto(document.getElementById('pedidoAddEquipo')?.value,document.getElementById('pedidoAddTipo')?.value||null);
     const qty=parseInt(document.getElementById('pedidoAddQty')?.value)||1;
     if(!eqId){toast('Escribe y elige un equipo de la lista',true);return;}
     const eq=equipos.find(e=>e.id===eqId);
@@ -8743,12 +8756,12 @@
   window.agregarMotoreductorPedido=async function(){
     const qty=parseInt(document.getElementById('pedidoAddQty')?.value)||1;
     if(qty<=0){toast('Cantidad inválida',true);return;}
-    const motorEq=pedidoAddMotorId?equipos.find(e=>e.id===pedidoAddMotorId):null;
-    const reductorEq=pedidoAddReductorId?equipos.find(e=>e.id===pedidoAddReductorId):null;
+    const motorEq=pedidoAddMotorId?equipos.find(e=>e.id===pedidoAddMotorId):equipos.find(e=>e.id===resolverEquipoPorTextoExacto(document.getElementById('pedidoAddMotor')?.value,'motor'));
+    const reductorEq=pedidoAddReductorId?equipos.find(e=>e.id===pedidoAddReductorId):equipos.find(e=>e.id===resolverEquipoPorTextoExacto(document.getElementById('pedidoAddReductor')?.value,'reductor'));
     const tieneBrazo=!!document.getElementById('pedidoAddTieneBrazo')?.checked;
-    const brazoEq=(tieneBrazo&&pedidoAddBrazoId)?equipos.find(e=>e.id===pedidoAddBrazoId):null;
+    const brazoEq=tieneBrazo?(pedidoAddBrazoId?equipos.find(e=>e.id===pedidoAddBrazoId):equipos.find(e=>e.id===resolverEquipoPorTextoExacto(document.getElementById('pedidoAddBrazo')?.value,'brazo'))):null;
     const tieneEjeSolido=!!document.getElementById('pedidoAddTieneEjeSolido')?.checked;
-    const ejeSolidoEq=(tieneEjeSolido&&pedidoAddEjeSolidoId)?equipos.find(e=>e.id===pedidoAddEjeSolidoId):null;
+    const ejeSolidoEq=tieneEjeSolido?(pedidoAddEjeSolidoId?equipos.find(e=>e.id===pedidoAddEjeSolidoId):equipos.find(e=>e.id===resolverEquipoPorTextoExacto(document.getElementById('pedidoAddEjeSolido')?.value,'eje_solido'))):null;
 
     async function construirParte(eq){
       if(!eq) return {equipoId:null,equipoNombre:null,cubierto:0};
@@ -8798,11 +8811,11 @@
   window.agregarSetSprocketPedido=async function(){
     const qty=parseInt(document.getElementById('pedidoAddQty')?.value)||1;
     if(qty<=0){toast('Cantidad inválida',true);return;}
-    const sp1=pedidoAddSprocket1Id?equipos.find(e=>e.id===pedidoAddSprocket1Id):null;
-    const sp2=pedidoAddSprocket2Id?equipos.find(e=>e.id===pedidoAddSprocket2Id):null;
+    const sp1=pedidoAddSprocket1Id?equipos.find(e=>e.id===pedidoAddSprocket1Id):equipos.find(e=>e.id===resolverEquipoPorTextoExacto(document.getElementById('pedidoAddSprocket1')?.value,'sprocket'));
+    const sp2=pedidoAddSprocket2Id?equipos.find(e=>e.id===pedidoAddSprocket2Id):equipos.find(e=>e.id===resolverEquipoPorTextoExacto(document.getElementById('pedidoAddSprocket2')?.value,'sprocket'));
     if(!sp1||!sp2){toast('Elige Sprocket 1 y Sprocket 2 de la lista',true);return;}
     const tieneCaja=!!document.getElementById('pedidoAddTieneCajaCadena')?.checked;
-    const cajaEq=tieneCaja?(pedidoAddCajaCadenaId?equipos.find(e=>e.id===pedidoAddCajaCadenaId):null):null;
+    const cajaEq=tieneCaja?(pedidoAddCajaCadenaId?equipos.find(e=>e.id===pedidoAddCajaCadenaId):equipos.find(e=>e.id===resolverEquipoPorTextoExacto(document.getElementById('pedidoAddCajaCadena')?.value,'caja_cadena'))):null;
     if(tieneCaja&&!cajaEq){toast('Elige la caja de cadena de la lista, o desmarca la opción',true);return;}
     const ordenCompra=document.getElementById('pedidoAddOrdenCompra')?.value.trim()||'';
     const grupoSetId='set_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
