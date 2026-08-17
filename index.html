@@ -7716,12 +7716,10 @@
         const vItem=_itemsArrPedido[vIdx];
         const vCub=cubiertoDeItem(vItem);
         const vPend=(vItem.cantidad||0)-vCub;
-        const vPuedeRetirar=(vItem.despachado||0)===0;
         const vFilaSeries=(!esNuevo&&pedidoSerieAbierta.has(vIdx))?renderFilaSeriesPedido(vItem,vIdx,pedidoActual.id,completo||(esReparacion&&vItem.deReparacion),completo):'';
         const vBtnSeries=(!esNuevo&&itemUsaSeries(vItem))?`<button class="btn-sm" style="background:#e3f2fd;color:#1565c0;white-space:nowrap;" onclick="toggleSerieItemPedido(${vIdx})">🔢 Series ${pedidoSerieAbierta.has(vIdx)?'▲':'▼'}</button>`:'';
         return `<tr style="background:#f1fbfb;border-left:3px solid #00acc1;">
           <td class="equipo-col" style="padding-left:22px;">
-            <span style="font-size:11px;color:#00695c;font-weight:700;">↳ 🔗🦷 Set Sprocket</span><br/>
             <strong>${vItem.equipoNombre}</strong>
             ${vPend>0?`<br/><span style="font-size:12px;color:#e65100;">⏳ Pendiente de asignar: ${vPend}</span>`:''}
             ${resumenSerialesItem(vItem)}
@@ -7730,20 +7728,30 @@
           <td>${vItem.cantidad}</td>
           <td class="qty-ok">${vCub}</td>
           <td class="qty-ok">${vItem.despachado||0}</td>
-          <td>
-            <div class="acciones-btns">
-              ${completo?vBtnSeries:esNuevo
-                ?`<button class="btn-sm" style="background:#eee;color:#666;" onclick="quitarItemPedidoNuevo(${vIdx})">✕ Quitar</button>`
-                :`${pedidoAccionesVisibles?`
-                    <button class="btn-sm" style="background:#eee;color:#666;white-space:nowrap;" onclick="editarOrdenCompraItemPedido('${pedidoActual.id}',${vIdx})">🧾 OC</button>
-                    <button class="btn-sm" style="background:#e0f7fa;color:#00695c;white-space:nowrap;" ${!vPuedeRetirar?'disabled':''} onclick="desvincularSetSprocketItem('${pedidoActual.id}',${vIdx})">🔓 Desvincular</button>
-                  `:''}
-                  ${vBtnSeries}
-                  ${pedidoAccionesVisibles&&vPuedeRetirar?`<button class="btn-sm" style="background:#fce4ec;color:#c62828;white-space:nowrap;" onclick="retirarItemPedido('${pedidoActual.id}',${vIdx})">✕ Retirar</button>`:''}`
-              }
-            </div>
-          </td>
+          <td><div class="acciones-btns">${vBtnSeries}</div></td>
         </tr>${vFilaSeries}`;
+      };
+      // Mini-encabezado del set vinculado: una sola barra de acciones para TODO el conjunto
+      // (mismas 2-3 líneas), en vez de repetir OC/Cant/Retirar/Desvincular en cada una.
+      const _grupoHeaderVinculo=(vIdxs)=>{
+        const primero=_itemsArrPedido[vIdxs[0]];
+        const grupoSetId=primero?.grupoSetId;
+        const compsGrupo=grupoSetId?_itemsArrPedido.filter(it=>it.grupoSetId===grupoSetId):vIdxs.map(v=>_itemsArrPedido[v]);
+        const grupoPuedeRetirar=compsGrupo.every(it=>(it.despachado||0)===0);
+        const barraGrupo=completo?'':(esNuevo
+          ?`<button class="btn-sm" style="background:#fff;color:#00695c;white-space:nowrap;" onclick="retirarGrupoSetSprocket('${pedidoActual.id||''}','${grupoSetId}')">✕ Quitar set</button>`
+          :(pedidoAccionesVisibles?`
+              <button class="btn-sm" style="background:#fff;color:#00695c;white-space:nowrap;" onclick="editarOrdenCompraGrupoSetSprocket('${pedidoActual.id}','${grupoSetId}')">🧾 OC</button>
+              <button class="btn-sm" style="background:#fff;color:#00695c;white-space:nowrap;" onclick="editarCantidadGrupoSetSprocket('${pedidoActual.id}','${grupoSetId}')">✏️ Cant.</button>
+              <button class="btn-sm" style="background:#fff;color:#00695c;white-space:nowrap;" ${!grupoPuedeRetirar?'disabled':''} onclick="desvincularGrupoSetSprocket('${pedidoActual.id}','${grupoSetId}')">🔓 Desvincular set</button>
+              ${grupoPuedeRetirar?`<button class="btn-sm" style="background:#fff;color:#c62828;white-space:nowrap;" onclick="retirarGrupoSetSprocket('${pedidoActual.id}','${grupoSetId}')">✕ Retirar set</button>`:''}
+            `:''));
+        return `<tr style="background:#e0f7fa;"><td colspan="6" style="color:#00695c;font-weight:700;font-size:12px;padding:6px 10px 6px 22px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+            <span>↳ ${primero?.grupoSetLabel||'🔗🦷 Set Sprocket'}</span>
+            ${barraGrupo?`<div class="acciones-btns" style="flex-wrap:wrap;">${barraGrupo}</div>`:''}
+          </div>
+        </td></tr>`;
       };
       html+=`<table class="items-table">
         <thead><tr><th>Equipo</th><th>Loc</th><th>Sol</th><th>Cub</th><th>Des</th><th></th></tr></thead>
@@ -7752,7 +7760,15 @@
           // Un Set Sprocket vinculado a otro equipo no se dibuja en su propia posición: se pinta
           // anidado justo después de la fila del equipo al que pertenece (ver _filaVinculoSetSprocket).
           if(item.vinculadoAItemIndex!=null&&_itemsArrPedido[item.vinculadoAItemIndex]) return '';
-          const filaVinculos=(_vinculosPorTarget[i]||[]).map(_filaVinculoSetSprocket).join('');
+          const _vIdxsDeTarget=_vinculosPorTarget[i]||[];
+          const _gruposDeTarget={};
+          _vIdxsDeTarget.forEach(v=>{
+            const gs=_itemsArrPedido[v].grupoSetId||('_sin_grupo_'+v);
+            (_gruposDeTarget[gs]=_gruposDeTarget[gs]||[]).push(v);
+          });
+          const filaVinculos=Object.values(_gruposDeTarget)
+            .map(vIdxs=>_grupoHeaderVinculo(vIdxs)+vIdxs.map(_filaVinculoSetSprocket).join(''))
+            .join('');
           const esMR=item.equipoTipo==='motoreductor';
           const cub=cubiertoDeItem(item);
           const pendStock=(item.cantidad||0)-cub;
@@ -7761,9 +7777,29 @@
           const btnSeries=(!esNuevo&&itemUsaSeries(item))?`<button class="btn-sm" style="background:#e3f2fd;color:#1565c0;white-space:nowrap;" onclick="toggleSerieItemPedido(${i})">🔢 Series ${pedidoSerieAbierta.has(i)?'▲':'▼'}</button>`:'';
           // Encabezado agrupador: se muestra antes de la primera línea de cada "set" (ej: Set
           // Sprocket) — sus 2-3 componentes son ítems normales e independientes, solo se ven
-          // agrupados visualmente por compartir grupoSetId.
-          const grupoHeader=(item.grupoSetId&&(pedidoActual.items||[])[i-1]?.grupoSetId!==item.grupoSetId)
-            ?`<tr class="grupo-set-header"><td colspan="6" style="background:#e0f7fa;color:#00695c;font-weight:700;font-size:12px;padding:6px 10px;border-radius:8px 8px 0 0;">${item.grupoSetLabel||'🔗 Set'}</td></tr>`:'';
+          // agrupados visualmente por compartir grupoSetId. Trae una barra de acciones que aplica
+          // a TODO el conjunto de una sola vez (retirar, OC, cantidad, localización), en vez de
+          // tener que repetir la acción línea por línea.
+          const esInicioDeGrupo=item.grupoSetId&&(pedidoActual.items||[])[i-1]?.grupoSetId!==item.grupoSetId;
+          let grupoHeader='';
+          if(esInicioDeGrupo){
+            const compsGrupo=(pedidoActual.items||[]).filter(it=>it.grupoSetId===item.grupoSetId);
+            const grupoPuedeRetirar=compsGrupo.every(it=>(it.despachado||0)===0);
+            const barraGrupo=completo?'':(esNuevo
+              ?`<button class="btn-sm" style="background:#fff;color:#00695c;white-space:nowrap;" onclick="retirarGrupoSetSprocket('${pedidoActual.id||''}','${item.grupoSetId}')">✕ Quitar set</button>`
+              :(pedidoAccionesVisibles?`
+                  <button class="btn-sm" style="background:#fff;color:#00695c;white-space:nowrap;" onclick="editarOrdenCompraGrupoSetSprocket('${pedidoActual.id}','${item.grupoSetId}')">🧾 OC</button>
+                  <button class="btn-sm" style="background:#fff;color:#00695c;white-space:nowrap;" onclick="editarCantidadGrupoSetSprocket('${pedidoActual.id}','${item.grupoSetId}')">✏️ Cant.</button>
+                  <button class="btn-sm" style="background:#fff;color:#00695c;white-space:nowrap;" onclick="editarLocalizacionGrupoSetSprocket('${pedidoActual.id}','${item.grupoSetId}')">📍 Loc.</button>
+                  ${grupoPuedeRetirar?`<button class="btn-sm" style="background:#fff;color:#c62828;white-space:nowrap;" onclick="retirarGrupoSetSprocket('${pedidoActual.id}','${item.grupoSetId}')">✕ Retirar set</button>`:''}
+                `:''));
+            grupoHeader=`<tr class="grupo-set-header"><td colspan="6" style="background:#e0f7fa;color:#00695c;font-weight:700;font-size:12px;padding:6px 10px;border-radius:8px 8px 0 0;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+                <span>${item.grupoSetLabel||'🔗 Set'}</span>
+                ${barraGrupo?`<div class="acciones-btns" style="flex-wrap:wrap;">${barraGrupo}</div>`:''}
+              </div>
+            </td></tr>`;
+          }
           const enGrupo=!!item.grupoSetId;
 
           if(esMR){
@@ -7843,7 +7879,7 @@
               <td class="qty-ok">${item.despachado||0}</td>
               <td>
                 <div class="acciones-btns">
-                  ${completo?btnSeries:esNuevo?`<button class="btn-sm" style="background:#eee;color:#666;" onclick="quitarItemPedidoNuevo(${i})">✕ Quitar</button>`:`
+                  ${completo?btnSeries:esNuevo?`<button class="btn-sm" style="background:#eee;color:#666;" onclick="quitarItemPedidoNuevo(${i})">✕ Quitar</button>${!item.deReparacion?`<button class="btn-sm" style="background:#e0f7fa;color:#00695c;white-space:nowrap;" onclick="vincularSetSprocketAItem(${i})">🔗 Set Sprocket</button>`:''}`:`
                     ${pedidoAccionesVisibles?`
                       ${item.deReparacion
                         ?(reemplazoMotor
@@ -7929,8 +7965,8 @@
             <td class="qty-ok">${item.despachado||0}</td>
             <td>
               <div class="acciones-btns">
-                ${completo?btnSeries:esNuevo
-                  ?`<button class="btn-sm" style="background:#eee;color:#666;" onclick="quitarItemPedidoNuevo(${i})">✕ Quitar</button>`
+                ${completo?btnSeries:enGrupo?btnSeries:esNuevo
+                  ?`<button class="btn-sm" style="background:#eee;color:#666;" onclick="quitarItemPedidoNuevo(${i})">✕ Quitar</button>${(!item.deReparacion&&(item.equipoTipo==='motor'||item.equipoTipo==='reductor'))?`<button class="btn-sm" style="background:#e0f7fa;color:#00695c;white-space:nowrap;" onclick="vincularSetSprocketAItem(${i})">🔗 Set Sprocket</button>`:''}`
                   :`${pedidoAccionesVisibles?`
                       ${item.deReparacion
                         ?(buscarReemplazoReparacion(i,item.equipoTipo)
@@ -8486,17 +8522,159 @@
     }
     return `${it.equipoTipo==='motor'?'⚡':'⚙️'} ${it.equipoNombre}`;
   }
-  // Tras quitar el ítem en itemIndexQuitado de un pedido, reacomoda las referencias
-  // vinculadoAItemIndex del resto de ítems: si apuntaban justo al que se quitó, quedan sueltas
-  // (null); si apuntaban a uno después, se corren un puesto hacia atrás.
+  // Tras quitar uno o varios ítems de un pedido (itemIndexQuitado: número o array de números),
+  // reacomoda las referencias vinculadoAItemIndex del resto: si apuntaban justo a uno de los que
+  // se quitaron, quedan sueltas (null); si apuntaban a uno después, se corren hacia atrás lo que
+  // corresponda.
   function reindexarVinculosSetSprocketTrasQuitar(items,itemIndexQuitado){
+    const quitados=Array.isArray(itemIndexQuitado)?itemIndexQuitado:[itemIndexQuitado];
     return (items||[]).map(it=>{
       if(it.vinculadoAItemIndex===undefined||it.vinculadoAItemIndex===null) return it;
-      if(it.vinculadoAItemIndex===itemIndexQuitado) return {...it,vinculadoAItemIndex:null};
-      if(it.vinculadoAItemIndex>itemIndexQuitado) return {...it,vinculadoAItemIndex:it.vinculadoAItemIndex-1};
-      return it;
+      if(quitados.includes(it.vinculadoAItemIndex)) return {...it,vinculadoAItemIndex:null};
+      const corridos=quitados.filter(q=>q<it.vinculadoAItemIndex).length;
+      return corridos>0?{...it,vinculadoAItemIndex:it.vinculadoAItemIndex-corridos}:it;
     });
   }
+  // Devuelve, para un grupoSetId dado, los índices (dentro de items) de sus componentes.
+  function indicesDeGrupoSetSprocket(items,grupoSetId){
+    return (items||[]).map((it,i)=>it.grupoSetId===grupoSetId?i:null).filter(i=>i!==null);
+  }
+  // Guarda el arreglo de items ya modificado, tanto para pedidos guardados (Firestore) como para
+  // el borrador de un pedido nuevo (aún sin id).
+  async function guardarItemsPedidoGrupoSet(pedidoId,updItems){
+    if(pedidoId){
+      await updateDoc(doc(db,'inv_pedidos',pedidoId),{items:updItems});
+      const p=pedidos.find(x=>x.id===pedidoId); if(p) p.items=updItems;
+    }
+    if(!pedidoId||pedidoActual.id===pedidoId){ pedidoActual.items=updItems; }
+  }
+
+  // Retira TODOS los componentes de un Set Sprocket (2-3 líneas) de una sola vez — igual que
+  // retirar cualquier equipo: libera el stock reservado que tuvieran y los quita del pedido.
+  // Funciona tanto en un pedido ya guardado como en el borrador de uno nuevo.
+  window.retirarGrupoSetSprocket=async function(pedidoId,grupoSetId){
+    const p=pedidoId?(pedidos.find(x=>x.id===pedidoId)):pedidoActual;
+    if(pedidoId&&!p){toast('Pedido no encontrado',true);return;}
+    const items=(p||pedidoActual).items||[];
+    const idxs=indicesDeGrupoSetSprocket(items,grupoSetId);
+    if(idxs.length===0){toast('Set no encontrado',true);return;}
+    const comps=idxs.map(i=>items[i]);
+    if(comps.some(it=>(it.despachado||0)>0)){toast('No se puede retirar: ya se despachó parte de este set',true);return;}
+    const totalCub=comps.reduce((s,it)=>s+(it.cubierto||0),0);
+    if(!confirm(`¿Retirar todo el Set Sprocket (${comps.length} línea${comps.length===1?'':'s'}) de este pedido?${totalCub>0?` Se liberarán ${totalCub} unidades reservadas en total.`:''}`)) return;
+    for(const it of comps){
+      const cub=it.cubierto||0;
+      if(cub>0&&it.equipoId){
+        const activo=Math.max(0,cub-(it.armadoLiberado||0));
+        if(activo>0) await liberarReservado(it.equipoId,activo);
+      }
+    }
+    const updItems=reindexarVinculosSetSprocketTrasQuitar(items.filter((it,i)=>!idxs.includes(i)),idxs);
+    if(pedidoId){
+      await finalizarRetiroItemPedido(pedidoId,p,updItems,'✓ Set Sprocket retirado del pedido',p.envios,false);
+    } else {
+      pedidoActual.items=updItems;
+      renderModalPedido();
+      toast('✓ Set Sprocket retirado');
+    }
+  }
+
+  // Edita la orden de compra del cliente para TODOS los componentes del set a la vez.
+  window.editarOrdenCompraGrupoSetSprocket=async function(pedidoId,grupoSetId){
+    const p=pedidoId?(pedidos.find(x=>x.id===pedidoId)):pedidoActual;
+    if(pedidoId&&!p){toast('Pedido no encontrado',true);return;}
+    const items=(p||pedidoActual).items||[];
+    const idxs=indicesDeGrupoSetSprocket(items,grupoSetId);
+    if(idxs.length===0){toast('Set no encontrado',true);return;}
+    const val=prompt('Orden de compra del cliente para todo el Set Sprocket (déjalo vacío para quitarla):',items[idxs[0]].ordenCompra||'');
+    if(val===null) return;
+    const ordenCompra=val.trim();
+    const updItems=items.map((it,i)=>idxs.includes(i)?{...it,ordenCompra}:it);
+    await guardarItemsPedidoGrupoSet(pedidoId,updItems);
+    renderModalPedido();
+    toast(ordenCompra?'✓ Orden de compra guardada para el set':'✓ Orden de compra quitada del set');
+  }
+
+  // Edita la localización para TODOS los componentes del set a la vez — pensado sobre todo para
+  // un Set Sprocket suelto (no vinculado a un motor/reductor/motoreductor).
+  window.editarLocalizacionGrupoSetSprocket=async function(pedidoId,grupoSetId){
+    const p=pedidoId?(pedidos.find(x=>x.id===pedidoId)):pedidoActual;
+    if(pedidoId&&!p){toast('Pedido no encontrado',true);return;}
+    const items=(p||pedidoActual).items||[];
+    const idxs=indicesDeGrupoSetSprocket(items,grupoSetId);
+    if(idxs.length===0){toast('Set no encontrado',true);return;}
+    const val=prompt('Localización para todo el Set Sprocket:',items[idxs[0]].localizacion||'');
+    if(val===null) return;
+    const loc=val.trim();
+    const updItems=items.map((it,i)=>idxs.includes(i)?{...it,localizacion:loc}:it);
+    await guardarItemsPedidoGrupoSet(pedidoId,updItems);
+    renderModalPedido();
+    toast('✓ Localización actualizada para el set');
+  }
+
+  // Cambia la cantidad solicitada de TODOS los componentes del set a la vez, liberando el
+  // exceso de reserva de cada uno si corresponde (misma lógica que editarCantidadItemPedido,
+  // aplicada a las 2-3 líneas del set en conjunto).
+  window.editarCantidadGrupoSetSprocket=async function(pedidoId,grupoSetId){
+    const p=pedidoId?(pedidos.find(x=>x.id===pedidoId)):pedidoActual;
+    if(pedidoId&&!p){toast('Pedido no encontrado',true);return;}
+    if(p&&p.estado==='completo'){toast('Este pedido ya fue enviado y no se puede editar',true);return;}
+    const items=(p||pedidoActual).items||[];
+    const idxs=indicesDeGrupoSetSprocket(items,grupoSetId);
+    if(idxs.length===0){toast('Set no encontrado',true);return;}
+    const comps=idxs.map(i=>items[i]);
+    if(comps.some(it=>(it.unidades||[]).length>0)){
+      toast('Este set usa series — ajusta la cantidad de cada componente por separado',true);
+      return;
+    }
+    const actual=comps[0].cantidad;
+    const val=prompt(`Nueva cantidad solicitada para todo el Set Sprocket (actual: ${actual})`,actual);
+    if(val===null) return;
+    const nueva=parseInt(val)||0;
+    if(nueva<=0){toast('Cantidad inválida',true);return;}
+    if(comps.some(it=>nueva<(it.despachado||0))){toast('No puede ser menor a lo ya despachado en alguno de los componentes',true);return;}
+    const totalExceso=comps.reduce((s,it)=>{const cubA=it.cubierto||0; return s+(nueva<cubA?cubA-nueva:0);},0);
+    if(!confirm(totalExceso>0?`¿Cambiar cantidad a ${nueva} para todo el set? Se liberarán ${totalExceso} unidades reservadas de más en total.`:`¿Cambiar cantidad solicitada a ${nueva} para todo el set?`)) return;
+    for(const it of comps){
+      const cubA=it.cubierto||0;
+      if(nueva<cubA&&it.equipoId){
+        const armadoLibActual=it.armadoLiberado||0;
+        const reservadoReal=Math.max(0,cubA-armadoLibActual);
+        const excesoReal=Math.min(cubA-nueva,reservadoReal);
+        if(excesoReal>0) await liberarReservado(it.equipoId,excesoReal);
+      }
+    }
+    const updItems=items.map((it,i)=>{
+      if(!idxs.includes(i)) return it;
+      const cubA=it.cubierto||0;
+      const cubNuevo=nueva<cubA?nueva:cubA;
+      const armadoLibActual=it.armadoLiberado||0;
+      const reservadoReal=Math.max(0,cubA-armadoLibActual);
+      const excesoBruto=nueva<cubA?cubA-nueva:0;
+      const excesoReal=Math.min(excesoBruto,reservadoReal);
+      const armadoLiberado=Math.max(0,armadoLibActual-(excesoBruto-excesoReal));
+      return {...it,cantidad:nueva,cubierto:cubNuevo,armadoLiberado};
+    });
+    await guardarItemsPedidoGrupoSet(pedidoId,updItems);
+    renderModalPedido();
+    toast('✓ Cantidad actualizada para el set');
+  }
+
+  // Desvincula TODOS los componentes del set del equipo al que estaban montados de una sola vez
+  // — vuelve a mostrarse suelto, bajo su propio encabezado "Set Sprocket".
+  window.desvincularGrupoSetSprocket=async function(pedidoId,grupoSetId){
+    const p=pedidoId?(pedidos.find(x=>x.id===pedidoId)):pedidoActual;
+    if(pedidoId&&!p){toast('Pedido no encontrado',true);return;}
+    const items=(p||pedidoActual).items||[];
+    const idxs=indicesDeGrupoSetSprocket(items,grupoSetId);
+    if(idxs.length===0){toast('Set no encontrado',true);return;}
+    if(!confirm('¿Desvincular todo el set del equipo? Sigue en el pedido, pero se mostrará suelto.')) return;
+    const updItems=items.map((it,i)=>idxs.includes(i)?{...it,vinculadoAItemIndex:null}:it);
+    await guardarItemsPedidoGrupoSet(pedidoId,updItems);
+    renderModalPedido();
+    toast('✓ Desvinculado');
+  }
+
   window.onInputPedidoAddTipo=function(){
     const q=document.getElementById('pedidoAddTipoTexto').value.trim().toLowerCase();
     const opciones=[TIPO_SET_SPROCKET,...tipos].filter(t=>!q||t.nombre.toLowerCase().includes(q));
