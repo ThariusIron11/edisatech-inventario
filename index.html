@@ -1674,6 +1674,31 @@
     const eq=equipos.find(e=>e.id===item.equipoId);
     return eq?.peso||0;
   }
+  // true si a una "parte" asignada (item.motor / item.reductor / un item suelto de tipo motor o
+  // reductor) le falta el peso en Catálogo — se usa para mostrar el tag "⚖️ Falta peso" en
+  // Pedidos y avisar que ese peso NO se está contando en la suma de la remisión/envío.
+  function faltaPesoDeParte(p){
+    if(!p?.equipoId) return false;
+    const peso=p.peso!=null?p.peso:(equipos.find(e=>e.id===p.equipoId)?.peso??null);
+    return peso==null;
+  }
+  // Peso ACTUAL (recalculado en vivo, no un valor congelado) de una remisión ya armada — busca
+  // cada ítem por su índice dentro del pedido y vuelve a calcular su peso con pesoDeItem(), que a
+  // su vez siempre lee el peso más reciente del equipo en Catálogo. Así, si el peso de un motor o
+  // reductor se corrige DESPUÉS de haber armado la remisión, el peso mostrado en el envío/remesa
+  // se actualiza solo, sin quedar pegado al valor que tenía al momento de armarla.
+  function pesoRemisionActual(itemsPedido,r){
+    if(!r.items||r.items.length===0) return r.pesoTotal||0;
+    let total=0, resolvioAlguno=false;
+    for(const reg of r.items){
+      const item=(itemsPedido||[])[reg.itemIndex];
+      if(!item) continue;
+      resolvioAlguno=true;
+      const qty=reg.tipo==='serial'?(reg.unidadIndices||[]).length:(reg.cantidad||0);
+      total+=pesoDeItem(item)*qty;
+    }
+    return resolvioAlguno?total:(r.pesoTotal||0);
+  }
   function nombreItemPedido(item){
     if(item.equipoTipo==='motoreductor'){
       const m=item.motor?.equipoNombre||'Motor sin asignar';
@@ -2069,12 +2094,15 @@
   // Cuando dos pedidos comparten la misma remesa (vinculoId), el peso mostrado debe sumar
   // las remisiones armadas en AMBOS pedidos para ese envío, no solo las del pedido abierto.
   function pesoEnvioCombinado(e,pedidoIdActual){
-    let total=(e.remisiones||[]).reduce((acc,r)=>acc+(r.pesoTotal||0),0);
+    const pedidoPropio=pedidos.find(p=>p.id===pedidoIdActual);
+    // Congelado si el envío ya se despachó; en vivo mientras siga en proceso (ver
+    // construirBloqueRemision para la misma regla aplicada al detalle de cada remisión).
+    let total=(e.remisiones||[]).reduce((acc,r)=>acc+(e.despachado?(r.pesoTotal||0):pesoRemisionActual(pedidoPropio?.items,r)),0);
     if(e.vinculoId){
       pedidos.forEach(p=>{
         if(p.id===pedidoIdActual) return;
         (p.envios||[]).forEach(oe=>{
-          if(oe.vinculoId===e.vinculoId) total+=(oe.remisiones||[]).reduce((acc,r)=>acc+(r.pesoTotal||0),0);
+          if(oe.vinculoId===e.vinculoId) total+=(oe.remisiones||[]).reduce((acc,r)=>acc+(oe.despachado?(r.pesoTotal||0):pesoRemisionActual(p.items,r)),0);
         });
       });
     }
@@ -2189,6 +2217,11 @@
     const g=opts&&opts.grande; // letra más grande — usado en la Ficha de Envío para legibilidad
     const fsTitulo=g?'16px':'12px', fsFecha=g?'14px':'11px', fsResumen=g?'16px':'12px', fsSerial=g?'14px':'11px', fsFlecha=g?'19px':'16px';
     const resumenCorto=(r.items||[]).map(it=>`${it.equipoNombre} x${it.tipo==='serial'?(it.unidadIndices||[]).length:it.cantidad}`).join(', ');
+    // Antes de despachar, el peso se recalcula en vivo (si corriges el peso de un equipo en
+    // Catálogo, se refleja de una vez); en cuanto se despacha, queda congelado con el valor que
+    // tenía en ese momento — ya no se debe mover aunque luego cambie el peso del equipo.
+    const envioDeEstaRemision=pedido.envios?.[ei];
+    const pesoActualRemision=envioDeEstaRemision?.despachado?(r.pesoTotal||0):pesoRemisionActual(pedido.items,r);
     const detalle=(r.items||[]).map(it=>{
       const seriales=detalleSerialesRemision(pedido,it);
       return `<div style="margin-top:${g?'6px':'4px'};">
@@ -2201,7 +2234,7 @@
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;cursor:pointer;" onclick="toggleRemisionAbierta('${key}')">
           <div style="flex:1;">
             <span style="font-size:${fsTitulo};font-weight:700;color:#1b2a1b;">Remisión: ${r.remision}</span>
-            <span style="font-size:${fsFecha};color:#777;"> · ${formatFecha(r.fecha)}${r.pesoTotal?` · ⚖️ ${r.pesoTotal.toFixed(2)} kg`:''}</span><br/>
+            <span style="font-size:${fsFecha};color:#777;"> · ${formatFecha(r.fecha)}${pesoActualRemision?` · ⚖️ ${pesoActualRemision.toFixed(2)} kg`:''}</span><br/>
             ${abierta?detalle:`<span style="font-size:${fsResumen};color:#555;">${resumenCorto}</span>`}
           </div>
           <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
@@ -7698,8 +7731,8 @@
               return `<tr style="background:#faf5fc;">
                 <td class="equipo-col"><strong style="color:#6a1b9a;">${itemTieneDevolucion(item)?'↩️ ':''}${etiquetaOrigen}</strong>${itemTieneDevolucion(item)?`<span style="font-size:11px;color:#1565c0;font-weight:700;"> (${cantidadDevueltaDeItem(item)} devuelta${cantidadDevueltaDeItem(item)===1?'':'s'})</span>`:''}<br/>
                   <div style="margin-left:6px;padding-left:10px;border-left:2px solid #ce93d8;">
-                    <span style="font-size:15px;">⚡ ${item.motor?.equipoNombre||'-'}${item.motor?.equipoId?` X ${item.cantidad} und`:' <span style="color:#888;">(pieza original)</span>'}</span><br/>
-                    <span style="font-size:15px;">⚙️ ${item.reductor?.equipoNombre||'-'}${item.reductor?.equipoId?` X ${item.cantidad} und`:' <span style="color:#888;">(pieza original)</span>'}</span>
+                    <span style="font-size:15px;">⚡ ${item.motor?.equipoNombre||'-'}${item.motor?.equipoId?` X ${item.cantidad} und`:' <span style="color:#888;">(pieza original)</span>'}${item.motor?.equipoId&&item.motor.equipoId!=='reparacion'&&faltaPesoDeParte(item.motor)?' <span style="font-size:11px;color:#e65100;background:#fff3e0;padding:1px 6px;border-radius:6px;">⚖️ Falta peso</span>':''}</span><br/>
+                    <span style="font-size:15px;">⚙️ ${item.reductor?.equipoNombre||'-'}${item.reductor?.equipoId?` X ${item.cantidad} und`:' <span style="color:#888;">(pieza original)</span>'}${item.reductor?.equipoId&&item.reductor.equipoId!=='reparacion'&&faltaPesoDeParte(item.reductor)?' <span style="font-size:11px;color:#e65100;background:#fff3e0;padding:1px 6px;border-radius:6px;">⚖️ Falta peso</span>':''}</span>
                   </div>
                   ${resumenSerialesItem(item)}
                   ${ocHtml}
@@ -7739,8 +7772,8 @@
             return `${motoreductorHeader}<tr style="${tieneArmadoMR?'background:#fffde7;':'background:#f4faf4;border-left:3px solid #43a047;'}">
               <td class="equipo-col">${itemTieneDevolucion(item)?`<strong style="color:#1565c0;">↩️ Motoreductor</strong><span style="font-size:11px;color:#1565c0;font-weight:700;"> (${cantidadDevueltaDeItem(item)} devuelta${cantidadDevueltaDeItem(item)===1?'':'s'})</span><br/>`:''}
                 <div style="margin-left:6px;padding-left:10px;border-left:2px solid #a5d6a7;">
-                  <span style="font-size:15px;">⚡ ${motorAsignado?`${item.motor.equipoNombre} X ${item.cantidad} und`:'<span style="color:#e65100;">Motor sin asignar</span>'}</span><br/>
-                  <span style="font-size:15px;">⚙️ ${reductorAsignado?`${item.reductor.equipoNombre} X ${item.cantidad} und`:'<span style="color:#e65100;">Reductor sin asignar</span>'}</span>
+                  <span style="font-size:15px;">⚡ ${motorAsignado?`${item.motor.equipoNombre} X ${item.cantidad} und`:'<span style="color:#e65100;">Motor sin asignar</span>'}${motorAsignado&&faltaPesoDeParte(item.motor)?' <span style="font-size:11px;color:#e65100;background:#fff3e0;padding:1px 6px;border-radius:6px;">⚖️ Falta peso</span>':''}</span><br/>
+                  <span style="font-size:15px;">⚙️ ${reductorAsignado?`${item.reductor.equipoNombre} X ${item.cantidad} und`:'<span style="color:#e65100;">Reductor sin asignar</span>'}${reductorAsignado&&faltaPesoDeParte(item.reductor)?' <span style="font-size:11px;color:#e65100;background:#fff3e0;padding:1px 6px;border-radius:6px;">⚖️ Falta peso</span>':''}</span>
                   ${item.tieneBrazo?`<br/><span style="font-size:15px;">🦾 ${brazoAsignado?`${item.brazo.equipoNombre} X ${item.cantidad} und`:'<span style="color:#e65100;">Brazo sin asignar</span>'}</span>`:''}
                   ${item.tieneEjeSolido?`<br/><span style="font-size:15px;">🔩 ${ejeSolidoAsignado?`${item.eje_solido.equipoNombre} X ${item.cantidad} und`:'<span style="color:#e65100;">Eje sólido sin asignar</span>'}</span>`:''}
                 </div>
@@ -7833,7 +7866,7 @@
                     const cubP=p.cubierto||0;
                     return `<span style="font-size:13px;">${p.nombre} X ${necesario} und${p.localizacion?` <span style="color:#999;">· ${p.localizacion}</span>`:''}${cubP<necesario?` <span style="color:#e65100;">(reservado ${cubP})</span>`:''}</span><br/>`;
                   }).join('')
-                :(tipoObjLone?'':`<span style="font-size:12px;color:#aaa;">${badgeHTML(item.equipoTipo)}</span>`)}${pendStock>0?`<br/><span style="font-size:12px;color:#e65100;">⏳ Pendiente de asignar: ${pendStock}</span>`:''}${(item.unidades||[]).filter(u=>u.armado).length>0?`<br/><span style="font-size:12px;color:#f57f17;">🔧 Armadas: ${(item.unidades||[]).filter(u=>u.armado).length} de ${item.unidades.length}</span>`:''}${resumenSerialesItem(item)}${ocHtmlLone}</td>
+                :(tipoObjLone?'':`<span style="font-size:12px;color:#aaa;">${badgeHTML(item.equipoTipo)}</span>`)}${(!item.compuesto&&(item.equipoTipo==='motor'||item.equipoTipo==='reductor')&&item.equipoId&&faltaPesoDeParte({equipoId:item.equipoId}))?` <span style="font-size:11px;color:#e65100;background:#fff3e0;padding:1px 6px;border-radius:6px;">⚖️ Falta peso</span>`:''}${pendStock>0?`<br/><span style="font-size:12px;color:#e65100;">⏳ Pendiente de asignar: ${pendStock}</span>`:''}${(item.unidades||[]).filter(u=>u.armado).length>0?`<br/><span style="font-size:12px;color:#f57f17;">🔧 Armadas: ${(item.unidades||[]).filter(u=>u.armado).length} de ${item.unidades.length}</span>`:''}${resumenSerialesItem(item)}${ocHtmlLone}</td>
             <td><span class="badge-loc">${item.localizacion||'-'}</span></td>
             <td>${item.cantidad}</td>
             <td class="qty-ok">${cub}</td>
@@ -7964,11 +7997,12 @@
     if((pedidoActual.remisiones||[]).length>0){
       html+=`<hr class="divider"/>
         <p class="sub-label">Remisiones</p>
-        ${(pedidoActual.remisiones||[]).map(r=>`
+        ${(pedidoActual.remisiones||[]).map(r=>{
+          return `
           <div class="despacho-row">
             <strong>${r.remision}</strong> — ${formatFecha(r.fecha)}${r.pesoTotal?` · ⚖️ ${r.pesoTotal.toFixed(2)} kg`:''}<br/>
             ${r.items.map(ri=>`${ri.equipoNombre} x${ri.cantidad}`).join(', ')}
-          </div>`).join('')}`;
+          </div>`;}).join('')}`;
     }
 
     const htmlEquipos=html;
@@ -8946,6 +8980,16 @@
     const envio=pedido.envios?.[ei];
     if(!envio||envio.despachado) return {ok:false, motivo:'Ese envío ya no está disponible (puede que ya se haya despachado)'};
 
+    // Justo antes de congelar el envío como despachado, se recalcula el peso de cada remisión por
+    // última vez con el peso ACTUAL de cada equipo (por si se corrigió algún peso en Catálogo
+    // después de armar la remisión) — ese es el valor que queda fijo de aquí en adelante. Antes
+    // del despacho el peso se ve en vivo; desde el despacho, congelado.
+    envio.remisiones=(envio.remisiones||[]).map(r=>{
+      const pesoFinal=pesoRemisionActual(pedido.items,r);
+      const {pesoTotal,...resto}=r;
+      return pesoFinal>0?{...resto,pesoTotal:pesoFinal}:resto;
+    });
+
     // Sumar, por ítem del pedido, cuánto se debe despachar entre todas las remisiones de este envío
     const cantidadPorItem={};
     (envio.remisiones||[]).forEach(r=>{
@@ -9048,10 +9092,15 @@
       }
     }
 
-    // Historial plano de remisiones del pedido (para la sección de Remisiones en Equipos)
+    // Historial plano de remisiones del pedido (para la sección de Remisiones en Equipos). Se
+    // conservan itemIndex/tipo/unidadIndices/cantidad (además de equipoNombre para mostrar) para
+    // poder recalcular el peso en vivo también aquí, aunque ya esté despachada.
     const nuevasRemisiones=(envio.remisiones||[]).map(r=>({
       remision:r.remision, fecha:r.fecha,
-      items:(r.items||[]).map(reg=>({equipoNombre:reg.equipoNombre,cantidad:reg.tipo==='serial'?(reg.unidadIndices||[]).length:reg.cantidad})),
+      items:(r.items||[]).map(reg=>({
+        equipoNombre:reg.equipoNombre, cantidad:reg.tipo==='serial'?(reg.unidadIndices||[]).length:reg.cantidad,
+        itemIndex:reg.itemIndex, tipo:reg.tipo, unidadIndices:reg.unidadIndices
+      })),
       empresa:envio.empresa, remesa:envio.remesa,
       ...(r.pesoTotal?{pesoTotal:r.pesoTotal}:{})
     }));
@@ -9585,7 +9634,7 @@
     if(tipoObj) candidatos=candidatos.filter(e=>e.tipo===tipoObj.valor);
     if(q) candidatos=candidatos.filter(e=>e.nombre.toLowerCase().includes(q)||e.variante?.toLowerCase().includes(q));
     renderAutocompleteList(document.getElementById('entEquipoList'), candidatos.slice(0,30).map(eq=>({
-      label:`<strong>${eq.nombre}</strong>${eq.variante?` <span style="color:#4527a0;">· ${eq.variante}</span>`:''}<small>${eq.localizacion} · ${eq.disponible||0} disp</small>`,
+      label:`${badgeHTML(eq.tipo)} <strong>${eq.nombre}</strong>${eq.variante?` <span style="color:#4527a0;">· ${eq.variante}</span>`:''}<small>${eq.localizacion} · ${eq.disponible||0} disp</small>`,
       onClick:()=>{
         document.getElementById('entEquipo').value=eq.nombre;
         document.getElementById('entVariante').value=eq.variante||'';
@@ -9707,7 +9756,7 @@
     if(tipoObj) candidatos=candidatos.filter(e=>e.tipo===tipoObj.valor);
     if(q) candidatos=candidatos.filter(e=>e.nombre.toLowerCase().includes(q)||e.variante?.toLowerCase().includes(q));
     renderAutocompleteList(document.getElementById('salEquipoList'), candidatos.slice(0,30).map(eq=>({
-      label:`<strong>${eq.nombre}</strong>${eq.variante?` <span style="color:#4527a0;">· ${eq.variante}</span>`:''}<small>${eq.localizacion} · ${eq.disponible||0} disp</small>`,
+      label:`${badgeHTML(eq.tipo)} <strong>${eq.nombre}</strong>${eq.variante?` <span style="color:#4527a0;">· ${eq.variante}</span>`:''}<small>${eq.localizacion} · ${eq.disponible||0} disp</small>`,
       onClick:()=>{
         document.getElementById('salEquipo').value=eq.nombre;
         document.getElementById('salVariante').value=eq.variante||'';
@@ -9781,7 +9830,7 @@
     wrap.style.display='block';
     body.innerHTML=salLista.map((it,i)=>`
       <tr>
-        <td class="equipo-col"><strong>${it.equipoNombre}</strong></td>
+        <td class="equipo-col">${badgeHTML(it.equipoTipo)} <strong>${it.equipoNombre}</strong></td>
         <td>${it.cantidad}</td>
         <td>${it.localizacion}</td>
         <td><button type="button" class="btn-sm" style="background:#fce4ec;color:#c62828;" onclick="quitarSalLista(${i})">✕</button></td>
@@ -9831,7 +9880,7 @@
     }
 
     salLista.push({
-      equipoId:eqExistente.id, equipoNombre:nombreConVariante(eqExistente),
+      equipoId:eqExistente.id, equipoNombre:nombreConVariante(eqExistente), equipoTipo:eqExistente.tipo,
       cantidad, localizacion:etiquetaLoc(locObj)
     });
     renderSalLista();
