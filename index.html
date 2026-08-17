@@ -2063,11 +2063,11 @@
     const esMR=item.equipoTipo==='motoreductor';
     if(esMR){
       const pares=item.unidades.filter(u=>u.motorSerial||u.reductorSerial)
-        .map(u=>`${u.motorSerial||'—'} / ${u.reductorSerial||'—'}`);
+        .map(u=>`${u.motorSerial||'—'} / ${u.reductorSerial||'—'}${u.tieneLocacion&&u.locacion?` <span style="color:#1565c0;">📍 ${u.locacion}</span>`:''}`);
       if(pares.length===0) return '';
       return `<br/><span style="font-size:13px;color:#555;">🔢 ${pares.join(', ')}</span>`;
     }
-    const seriales=item.unidades.filter(u=>u.serial).map(u=>u.serial);
+    const seriales=item.unidades.filter(u=>u.serial).map(u=>`${u.serial}${u.tieneLocacion&&u.locacion?` <span style="color:#1565c0;">📍 ${u.locacion}</span>`:''}`);
     if(seriales.length===0) return '';
     return `<br/><span style="font-size:13px;color:#555;">🔢 ${seriales.join(', ')}</span>`;
   }
