@@ -1361,6 +1361,9 @@
   let pedidoAddTieneCajaCadenaChecked=false;
   let pedidoAddCajaCadenaId=null;
   let pedidoAddCajaCadenaTexto='';
+  // Índice (dentro de pedidoActual.items) del equipo motor/reductor/motoreductor al que este
+  // Set Sprocket se va a vincular, o null si va suelto. Ver VINCULO_TIPOS_SET_SPROCKET.
+  let pedidoAddSetSprocketVinculoIdx=null;
   function limpiarFormularioAgregarPedido(){
     pedidoAddEquipoId=null; pedidoAddMotorId=null; pedidoAddReductorId=null; pedidoAddBrazoId=null; pedidoAddEjeSolidoId=null;
     pedidoAddTipoVal=''; pedidoAddEquipoTexto=''; pedidoAddMotorTexto=''; pedidoAddReductorTexto='';
@@ -1370,6 +1373,7 @@
     pedidoAddSprocket1Id=null; pedidoAddSprocket1Texto='';
     pedidoAddSprocket2Id=null; pedidoAddSprocket2Texto='';
     pedidoAddTieneCajaCadenaChecked=false; pedidoAddCajaCadenaId=null; pedidoAddCajaCadenaTexto='';
+    pedidoAddSetSprocketVinculoIdx=null;
   }
   // Estas dos funciones permiten que cada pestaña de pedido (tab_1, tab_2...) tenga su propio
   // borrador del formulario "Agregar equipo" — se guarda al salir de una pestaña y se restaura
@@ -1397,7 +1401,8 @@
       sprocket2Id:pedidoAddSprocket2Id,
       tieneCajaCadena:document.getElementById('pedidoAddTieneCajaCadena')?.checked??pedidoAddTieneCajaCadenaChecked,
       cajaCadenaTexto:document.getElementById('pedidoAddCajaCadena')?.value??pedidoAddCajaCadenaTexto,
-      cajaCadenaId:pedidoAddCajaCadenaId
+      cajaCadenaId:pedidoAddCajaCadenaId,
+      setSprocketVinculoIdx:pedidoAddSetSprocketVinculoIdx
     };
   }
   function restaurarDraftFormularioAgregarPedido(draft){
@@ -1424,6 +1429,7 @@
     pedidoAddTieneCajaCadenaChecked=!!draft.tieneCajaCadena;
     pedidoAddCajaCadenaTexto=draft.cajaCadenaTexto||'';
     pedidoAddCajaCadenaId=draft.cajaCadenaId||null;
+    pedidoAddSetSprocketVinculoIdx=(draft.setSprocketVinculoIdx===undefined||draft.setSprocketVinculoIdx===null)?null:draft.setSprocketVinculoIdx;
   }
   let asignarComponenteId=null;
   // ══════════ SIMULACIÓN DE ENVÍO (calculadora de peso a futuro, sin remesa/remisión/transportador) ══════════
@@ -5182,6 +5188,7 @@
   // Quitar un ítem de un pedido que aún NO se ha guardado (no toca stock, es solo local)
   window.quitarItemPedidoNuevo=function(itemIndex){
     pedidoActual.items.splice(itemIndex,1);
+    pedidoActual.items=reindexarVinculosSetSprocketTrasQuitar(pedidoActual.items,itemIndex);
     renderModalPedido();
   }
 
@@ -6161,7 +6168,7 @@
     if(item.deReparacion){
       // Equipo propio del cliente (reparación): nunca tocó stock del catálogo, se retira directo.
       if(!confirm(`¿Retirar "${item.equipoTipo==='motoreductor'?'este motoreductor':(item.equipoNombre||'este equipo')}" de este pedido?`)) return;
-      const updItems=itemsBase.filter((it,i)=>i!==itemIndex);
+      const updItems=reindexarVinculosSetSprocketTrasQuitar(itemsBase.filter((it,i)=>i!==itemIndex),itemIndex);
       await finalizarRetiroItemPedido(pedidoId,p,updItems,'✓ Equipo retirado del pedido',enviosAjustados,remisionCancelada);
       return;
     }
@@ -6185,7 +6192,7 @@
       if(cubE>0&&item.eje_solido?.equipoId){
         await liberarReservado(item.eje_solido.equipoId,cubE);
       }
-      const updItems=itemsBase.filter((it,i)=>i!==itemIndex);
+      const updItems=reindexarVinculosSetSprocketTrasQuitar(itemsBase.filter((it,i)=>i!==itemIndex),itemIndex);
       await finalizarRetiroItemPedido(pedidoId,p,updItems,'✓ Motoreductor retirado del pedido',enviosAjustados,remisionCancelada);
       return;
     }
@@ -6199,7 +6206,7 @@
           await liberarReservado(pz.equipoId,pz.cubierto);
         }
       }
-      const updItems=itemsBase.filter((it,i)=>i!==itemIndex);
+      const updItems=reindexarVinculosSetSprocketTrasQuitar(itemsBase.filter((it,i)=>i!==itemIndex),itemIndex);
       await finalizarRetiroItemPedido(pedidoId,p,updItems,'✓ Equipo retirado del pedido',enviosAjustados,remisionCancelada);
       return;
     }
@@ -6209,7 +6216,7 @@
       const activo=Math.max(0,cub-(item.armadoLiberado||0));
       if(activo>0) await liberarReservado(item.equipoId,activo);
     }
-    const updItems=itemsBase.filter((it,i)=>i!==itemIndex);
+    const updItems=reindexarVinculosSetSprocketTrasQuitar(itemsBase.filter((it,i)=>i!==itemIndex),itemIndex);
     await finalizarRetiroItemPedido(pedidoId,p,updItems,'✓ Equipo retirado del pedido',enviosAjustados,remisionCancelada);
   }
 
@@ -7694,10 +7701,58 @@
     if((pedidoActual.items||[]).length===0){
       html+='<p style="font-size:13px;color:#bbb;margin-bottom:10px;">Sin equipos aún</p>';
     } else {
+      // Ítems de Set Sprocket vinculados a un equipo (motor/reductor/motoreductor): no se
+      // renderizan en su propia posición del array ni con su propio encabezado — se agrupan acá
+      // por el índice del equipo al que están vinculados, para pintarse anidados justo debajo de
+      // ese equipo, con el mismo color de "Set Sprocket" pero sin franja de encabezado aparte.
+      const _itemsArrPedido=pedidoActual.items||[];
+      const _vinculosPorTarget={};
+      _itemsArrPedido.forEach((it,idx)=>{
+        if(it.vinculadoAItemIndex!=null&&_itemsArrPedido[it.vinculadoAItemIndex]){
+          (_vinculosPorTarget[it.vinculadoAItemIndex]=_vinculosPorTarget[it.vinculadoAItemIndex]||[]).push(idx);
+        }
+      });
+      const _filaVinculoSetSprocket=(vIdx)=>{
+        const vItem=_itemsArrPedido[vIdx];
+        const vCub=cubiertoDeItem(vItem);
+        const vPend=(vItem.cantidad||0)-vCub;
+        const vPuedeRetirar=(vItem.despachado||0)===0;
+        const vFilaSeries=(!esNuevo&&pedidoSerieAbierta.has(vIdx))?renderFilaSeriesPedido(vItem,vIdx,pedidoActual.id,completo||(esReparacion&&vItem.deReparacion),completo):'';
+        const vBtnSeries=(!esNuevo&&itemUsaSeries(vItem))?`<button class="btn-sm" style="background:#e3f2fd;color:#1565c0;white-space:nowrap;" onclick="toggleSerieItemPedido(${vIdx})">🔢 Series ${pedidoSerieAbierta.has(vIdx)?'▲':'▼'}</button>`:'';
+        return `<tr style="background:#f1fbfb;border-left:3px solid #00acc1;">
+          <td class="equipo-col" style="padding-left:22px;">
+            <span style="font-size:11px;color:#00695c;font-weight:700;">↳ 🔗🦷 Set Sprocket</span><br/>
+            <strong>${vItem.equipoNombre}</strong>
+            ${vPend>0?`<br/><span style="font-size:12px;color:#e65100;">⏳ Pendiente de asignar: ${vPend}</span>`:''}
+            ${resumenSerialesItem(vItem)}
+          </td>
+          <td><span class="badge-loc">${vItem.localizacion||'-'}</span></td>
+          <td>${vItem.cantidad}</td>
+          <td class="qty-ok">${vCub}</td>
+          <td class="qty-ok">${vItem.despachado||0}</td>
+          <td>
+            <div class="acciones-btns">
+              ${completo?vBtnSeries:esNuevo
+                ?`<button class="btn-sm" style="background:#eee;color:#666;" onclick="quitarItemPedidoNuevo(${vIdx})">✕ Quitar</button>`
+                :`${pedidoAccionesVisibles?`
+                    <button class="btn-sm" style="background:#eee;color:#666;white-space:nowrap;" onclick="editarOrdenCompraItemPedido('${pedidoActual.id}',${vIdx})">🧾 OC</button>
+                    <button class="btn-sm" style="background:#e0f7fa;color:#00695c;white-space:nowrap;" ${!vPuedeRetirar?'disabled':''} onclick="desvincularSetSprocketItem('${pedidoActual.id}',${vIdx})">🔓 Desvincular</button>
+                  `:''}
+                  ${vBtnSeries}
+                  ${pedidoAccionesVisibles&&vPuedeRetirar?`<button class="btn-sm" style="background:#fce4ec;color:#c62828;white-space:nowrap;" onclick="retirarItemPedido('${pedidoActual.id}',${vIdx})">✕ Retirar</button>`:''}`
+              }
+            </div>
+          </td>
+        </tr>${vFilaSeries}`;
+      };
       html+=`<table class="items-table">
         <thead><tr><th>Equipo</th><th>Loc</th><th>Sol</th><th>Cub</th><th>Des</th><th></th></tr></thead>
         <tbody>
         ${(pedidoActual.items||[]).map((item,i)=>{
+          // Un Set Sprocket vinculado a otro equipo no se dibuja en su propia posición: se pinta
+          // anidado justo después de la fila del equipo al que pertenece (ver _filaVinculoSetSprocket).
+          if(item.vinculadoAItemIndex!=null&&_itemsArrPedido[item.vinculadoAItemIndex]) return '';
+          const filaVinculos=(_vinculosPorTarget[i]||[]).map(_filaVinculoSetSprocket).join('');
           const esMR=item.equipoTipo==='motoreductor';
           const cub=cubiertoDeItem(item);
           const pendStock=(item.cantidad||0)-cub;
@@ -7750,7 +7805,7 @@
                     `}
                   </div>
                 </td>
-              </tr>${filaSeries}`;
+              </tr>${filaSeries}${filaVinculos}`;
             }
 
             const motorAsignado=!!item.motor?.equipoId;
@@ -7829,13 +7884,14 @@
                       ${item.deReparacion?'':`<button class="btn-sm" style="background:#eee;color:#666;white-space:nowrap;" onclick="editarCantidadItemPedido('${pedidoActual.id}',${i})">✏️ Cant.</button>`}
                       ${item.deReparacion?`<button class="btn-sm" style="background:#fff3e0;color:#e65100;white-space:nowrap;" ${!puedeRetirar?'disabled':''} onclick="resetearReparacionPedido('${pedidoActual.id}',${i})">🔁 Restablecer</button>`:''}
                       <button class="btn-sm" style="background:#eee;color:#666;white-space:nowrap;" onclick="editarOrdenCompraItemPedido('${pedidoActual.id}',${i})">🧾 OC</button>
+                      ${!item.deReparacion?`<button class="btn-sm" style="background:#e0f7fa;color:#00695c;white-space:nowrap;" onclick="vincularSetSprocketAItem(${i})">🔗 Set Sprocket</button>`:''}
                     `:''}
                     ${btnSeries}
                     ${pedidoAccionesVisibles&&puedeRetirar&&!item.deReparacion?`<button class="btn-sm" style="background:#fce4ec;color:#c62828;white-space:nowrap;" onclick="retirarItemPedido('${pedidoActual.id}',${i})">✕ Retirar</button>`:''}
                   `}
                 </div>
               </td>
-            </tr>${filaSeries}`;
+            </tr>${filaSeries}${filaVinculos}`;
           }
 
           const liberable=cub-(item.despachado||0);
@@ -7891,13 +7947,14 @@
                           ${(tipoAdmiteArmado(item.equipoTipo)&&(item.unidades||[]).length>0)?`<button class="btn-sm" style="background:#fff8e1;color:#f57f17;white-space:nowrap;" onclick="abrirMarcarArmado('${pedidoActual.id}',${i})">🔧 Armado</button>`:''}
                         `}
                       <button class="btn-sm" style="background:#eee;color:#666;white-space:nowrap;" onclick="editarOrdenCompraItemPedido('${pedidoActual.id}',${i})">🧾 OC</button>
+                      ${(!item.deReparacion&&(item.equipoTipo==='motor'||item.equipoTipo==='reductor'))?`<button class="btn-sm" style="background:#e0f7fa;color:#00695c;white-space:nowrap;" onclick="vincularSetSprocketAItem(${i})">🔗 Set Sprocket</button>`:''}
                     `:''}
                     ${btnSeries}
                     ${pedidoAccionesVisibles&&puedeRetirar&&!item.deReparacion?`<button class="btn-sm" style="background:#fce4ec;color:#c62828;white-space:nowrap;" onclick="retirarItemPedido('${pedidoActual.id}',${i})">✕ Retirar</button>`:''}`
                 }
               </div>
             </td>
-          </tr>${filaSeries}`;
+          </tr>${filaSeries}${filaVinculos}`;
         }).join('')}
         </tbody>
       </table>`;
@@ -7965,6 +8022,14 @@
         </div>
         <div id="pedidoAddSetSprocket" style="display:${pedidoAddTipoVal==='set_sprocket'?'block':'none'};">
           <p style="font-size:11px;color:#aaa;margin-bottom:6px;">Se arma con 2 sprockets sueltos del inventario (y opcionalmente una caja de cadena). Cada uno queda como línea propia del pedido, agrupada bajo "Set Sprocket".</p>
+          ${itemsVinculablesSetSprocket(pedidoActual.items).length>0?`
+          <p class="field-label" style="margin-top:0;">🔗 ¿Este set va montado con algún equipo de este pedido? (opcional)</p>
+          <select id="pedidoAddSetSprocketVinculo" onchange="onChangePedidoAddSetSprocketVinculo()" style="margin-bottom:8px;">
+            <option value="">— Ninguno, va suelto —</option>
+            ${itemsVinculablesSetSprocket(pedidoActual.items).map(({idx,it})=>`<option value="${idx}" ${pedidoAddSetSprocketVinculoIdx===idx?'selected':''}>${labelItemVinculoSetSprocket(it)}</option>`).join('')}
+          </select>
+          ${pedidoAddSetSprocketVinculoIdx!=null?`<p style="font-size:11px;color:#00695c;margin-top:-4px;margin-bottom:8px;">Este set se mostrará dentro del equipo elegido en vez de aparte, pero su peso y su reserva de stock se siguen contando igual.</p>`:''}
+          `:''}
           <div class="autocomplete-wrap">
             <input type="text" id="pedidoAddSprocket1" placeholder="🦷 Sprocket 1..." autocomplete="off" value="${pedidoAddSprocket1Texto}" oninput="onInputPedidoAddSprocket1()" onfocus="onInputPedidoAddSprocket1()" style="margin-bottom:8px;" />
             <div class="autocomplete-list" id="pedidoAddSprocket1List"></div>
@@ -8403,6 +8468,35 @@
   // catálogo real (no aparece en Config > Tipos, ni en Inventario/Entrada), es solo una forma de
   // armar el pedido combinando 2 sprockets sueltos (+ opcional caja de cadena) en varias líneas.
   const TIPO_SET_SPROCKET={valor:'set_sprocket', nombre:'Set Sprocket', emoji:'🔗🦷'};
+  // Tipos de equipo del pedido a los que se puede vincular un Set Sprocket (va montado sobre
+  // ellos: motor, reductor o motoreductor). Un Set Sprocket vinculado no se muestra como grupo
+  // aparte con su propio encabezado — se muestra anidado dentro de la fila del equipo al que
+  // pertenece, conservando el mismo color/estilo de "Set Sprocket", pero su peso y su reserva de
+  // stock se siguen contando exactamente igual que cualquier línea normal del pedido.
+  const TIPOS_VINCULABLES_SET_SPROCKET=['motor','reductor','motoreductor'];
+  function itemsVinculablesSetSprocket(items){
+    return (items||pedidoActual.items||[])
+      .map((it,idx)=>({idx,it}))
+      .filter(({it})=>TIPOS_VINCULABLES_SET_SPROCKET.includes(it.equipoTipo)&&!it.deReparacion&&!it.vinculadoAItemIndex&&it.vinculadoAItemIndex!==0);
+  }
+  function labelItemVinculoSetSprocket(it){
+    if(it.equipoTipo==='motoreductor'){
+      const partes=[it.motor?.equipoNombre?`⚡ ${it.motor.equipoNombre}`:null, it.reductor?.equipoNombre?`⚙️ ${it.reductor.equipoNombre}`:null].filter(Boolean);
+      return `🧩 Motoreductor${partes.length?' · '+partes.join(' · '):''}`;
+    }
+    return `${it.equipoTipo==='motor'?'⚡':'⚙️'} ${it.equipoNombre}`;
+  }
+  // Tras quitar el ítem en itemIndexQuitado de un pedido, reacomoda las referencias
+  // vinculadoAItemIndex del resto de ítems: si apuntaban justo al que se quitó, quedan sueltas
+  // (null); si apuntaban a uno después, se corren un puesto hacia atrás.
+  function reindexarVinculosSetSprocketTrasQuitar(items,itemIndexQuitado){
+    return (items||[]).map(it=>{
+      if(it.vinculadoAItemIndex===undefined||it.vinculadoAItemIndex===null) return it;
+      if(it.vinculadoAItemIndex===itemIndexQuitado) return {...it,vinculadoAItemIndex:null};
+      if(it.vinculadoAItemIndex>itemIndexQuitado) return {...it,vinculadoAItemIndex:it.vinculadoAItemIndex-1};
+      return it;
+    });
+  }
   window.onInputPedidoAddTipo=function(){
     const q=document.getElementById('pedidoAddTipoTexto').value.trim().toLowerCase();
     const opciones=[TIPO_SET_SPROCKET,...tipos].filter(t=>!q||t.nombre.toLowerCase().includes(q));
@@ -8577,6 +8671,43 @@
         closeAllAutocomplete();
       }
     })), 'Sin sprockets que coincidan');
+  }
+
+  window.onChangePedidoAddSetSprocketVinculo=function(){
+    const v=document.getElementById('pedidoAddSetSprocketVinculo')?.value;
+    pedidoAddSetSprocketVinculoIdx=(v===''||v===undefined||v===null)?null:parseInt(v);
+    renderModalPedido();
+  }
+
+  // Abre (si hace falta) el bloque "Agregar equipo al pedido", lo deja en modo Set Sprocket y
+  // preselecciona el vínculo hacia este motor/reductor/motoreductor ya agregado — así se puede
+  // vincular un Set Sprocket después, sin tener que armarlo todo desde cero.
+  window.vincularSetSprocketAItem=function(itemIndex){
+    pedidoAddSectionAbierta=true;
+    pedidoAddTipoVal='set_sprocket';
+    pedidoAddSetSprocketVinculoIdx=itemIndex;
+    document.getElementById('pedidoAddTipo')&&(document.getElementById('pedidoAddTipo').value='set_sprocket');
+    renderModalPedido();
+    toast('Elige los 2 sprockets (y caja de cadena si aplica) — quedarán vinculados a este equipo');
+  }
+
+  // Quita el vínculo de un componente de Set Sprocket con el equipo al que estaba montado: sigue
+  // en el pedido, solo que vuelve a mostrarse suelto (agrupado bajo su propio encabezado "Set
+  // Sprocket" si comparte grupoSetId con otros componentes).
+  window.desvincularSetSprocketItem=async function(pedidoId,itemIndex){
+    const p=pedidoId?(pedidos.find(x=>x.id===pedidoId)||pedidoActual):pedidoActual;
+    const item=(p.items||[])[itemIndex];
+    if(!item){toast('Ítem no encontrado',true);return;}
+    if(!confirm('¿Desvincular este componente del equipo? Sigue en el pedido, pero se mostrará suelto.')) return;
+    const updItems=(p.items||[]).map((it,i)=>i!==itemIndex?it:{...it,vinculadoAItemIndex:null});
+    if(pedidoActual.id){
+      await updateDoc(doc(db,'inv_pedidos',pedidoActual.id),{items:updItems});
+      pedidoActual.items=updItems;
+    } else {
+      pedidoActual.items=updItems;
+    }
+    renderModalPedido();
+    toast('✓ Desvinculado');
   }
 
   window.onToggleTieneCajaCadena=function(){
@@ -8819,12 +8950,18 @@
     if(tieneCaja&&!cajaEq){toast('Elige la caja de cadena de la lista, o desmarca la opción',true);return;}
     const ordenCompra=document.getElementById('pedidoAddOrdenCompra')?.value.trim()||'';
     const grupoSetId='set_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+    // Si se eligió vincular a un equipo ya agregado (motor/reductor/motoreductor), cada
+    // componente queda con vinculadoAItemIndex apuntando a ese ítem — se sigue reservando/
+    // contando su peso exactamente igual, solo cambia cómo se muestra en la tabla del pedido.
+    const vinculoIdx=(pedidoAddSetSprocketVinculoIdx!=null&&(pedidoActual.items||[])[pedidoAddSetSprocketVinculoIdx])?pedidoAddSetSprocketVinculoIdx:null;
+    const vinculoLabel=vinculoIdx!=null?labelItemVinculoSetSprocket(pedidoActual.items[vinculoIdx]):null;
 
     async function construirComponente(eq,rol){
       const nuevoItem={
         equipoId:eq.id, equipoNombre:`${rol} · ${nombreConVariante(eq)}`, equipoTipo:eq.tipo,
         localizacion:eq.localizacion, cantidad:qty, despachado:0, ordenCompra, usaSerial:!!eq.usaSerial,
-        grupoSetId, grupoSetLabel:'🔗🦷 Set Sprocket', grupoSetRol:rol
+        grupoSetId, grupoSetLabel:vinculoLabel?`🔗🦷 Set Sprocket · ${vinculoLabel}`:'🔗🦷 Set Sprocket', grupoSetRol:rol,
+        ...(vinculoIdx!=null?{vinculadoAItemIndex:vinculoIdx}:{})
       };
       if(tipoUsaSeries(eq.tipo)||eq.usaSerial){
         nuevoItem.unidades=Array.from({length:qty},()=>crearUnidadVacia(false));
@@ -8857,7 +8994,7 @@
     pedidoAddSprocket1Id=null; pedidoAddSprocket2Id=null; pedidoAddCajaCadenaId=null;
     limpiarFormularioAgregarPedido();
     renderModalPedido();
-    toast('✓ Set Sprocket agregado'+(faltantes.length?' — parte del stock quedó pendiente de asignar':''));
+    toast('✓ Set Sprocket agregado'+(vinculoLabel?` — vinculado a ${vinculoLabel}`:'')+(faltantes.length?' — parte del stock quedó pendiente de asignar':''));
   }
 
   window.guardarNuevoPedido=async function(){
