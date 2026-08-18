@@ -7795,7 +7795,7 @@
                 `:''));
             grupoHeader=`<tr class="grupo-set-header"><td colspan="6" style="background:#e0f7fa;color:#00695c;font-weight:700;font-size:12px;padding:6px 10px;border-radius:8px 8px 0 0;">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
-                <span>${item.grupoSetLabel||'🔗 Set'}</span>
+                <span>${item.grupoSetLabel||'🔗 Set'}${item.ubicacionEnvio?` <span style="font-weight:400;color:#00838f;">· 📍 ${item.ubicacionEnvio}</span>`:''}</span>
                 ${barraGrupo?`<div class="acciones-btns" style="flex-wrap:wrap;">${barraGrupo}</div>`:''}
               </div>
             </td></tr>`;
@@ -8595,21 +8595,23 @@
     toast(ordenCompra?'✓ Orden de compra guardada para el set':'✓ Orden de compra quitada del set');
   }
 
-  // Edita la localización para TODOS los componentes del set a la vez — pensado sobre todo para
-  // un Set Sprocket suelto (no vinculado a un motor/reductor/motoreductor).
+  // Edita la "Ubicación de envío" (a dónde se manda el set — NO la localización de bodega/stock)
+  // para TODOS los componentes del set a la vez. Es un campo simple del ítem (ubicacionEnvio),
+  // no depende de que el componente tenga números de serie.
   window.editarLocalizacionGrupoSetSprocket=async function(pedidoId,grupoSetId){
     const p=pedidoId?(pedidos.find(x=>x.id===pedidoId)):pedidoActual;
     if(pedidoId&&!p){toast('Pedido no encontrado',true);return;}
+    if(p&&p.estado==='completo'){toast('Este pedido ya fue enviado y no se puede editar',true);return;}
     const items=(p||pedidoActual).items||[];
     const idxs=indicesDeGrupoSetSprocket(items,grupoSetId);
     if(idxs.length===0){toast('Set no encontrado',true);return;}
-    const val=prompt('Localización para todo el Set Sprocket:',items[idxs[0]].localizacion||'');
+    const val=prompt('Ubicación de envío para todo el Set Sprocket (déjala vacía para quitarla):',items[idxs[0]].ubicacionEnvio||'');
     if(val===null) return;
     const loc=val.trim();
-    const updItems=items.map((it,i)=>idxs.includes(i)?{...it,localizacion:loc}:it);
+    const updItems=items.map((it,i)=>idxs.includes(i)?{...it,ubicacionEnvio:loc}:it);
     await guardarItemsPedidoGrupoSet(pedidoId,updItems);
     renderModalPedido();
-    toast('✓ Localización actualizada para el set');
+    toast(loc?'✓ Ubicación de envío guardada para el set':'✓ Ubicación de envío quitada del set');
   }
 
   // Cambia la cantidad solicitada de TODOS los componentes del set a la vez, liberando el
