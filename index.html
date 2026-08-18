@@ -277,7 +277,8 @@
     .config-item-label{flex:1;font-size:14px;font-weight:600;color:#1b2a1b;}
     /* ── SUBPESTAÑAS (Config) ── */
     .subtabs{display:flex;gap:4px;margin-bottom:18px;border-bottom:1.5px solid #eee;flex-wrap:wrap;}
-    .modal-box .subtabs{position:sticky;top:0;z-index:5;background:#fff;}
+    #pedidoModalHeaderSticky{position:sticky;top:0;z-index:6;background:#fff;}
+    .modal-box .subtabs{position:sticky;top:var(--pedido-header-h,0px);z-index:5;background:#fff;}
     .subtab-btn{padding:10px 14px;border:none;background:transparent;color:#888;font-size:13px;font-weight:600;cursor:pointer;border-bottom:2.5px solid transparent;margin-bottom:-1.5px;transition:all 0.2s;white-space:nowrap;}
     .subtab-btn.active{color:#1b2a1b;border-bottom-color:#1b2a1b;}
     .subtab-btn:hover:not(.active){color:#1b2a1b;}
@@ -970,9 +971,11 @@
 <div class="modal-overlay hidden" id="modalPedido" onclick="cerrarModalPedido(event)">
   <div class="modal-box">
     <button class="modal-close" onclick="cerrarModalPedido()">✕</button>
-    <div id="pedidoTabsStrip"></div>
-    <p class="modal-titulo" id="pedidoModalTitulo">Nuevo pedido</p>
-    <p class="modal-sub" id="pedidoModalSub"></p>
+    <div id="pedidoModalHeaderSticky">
+      <div id="pedidoTabsStrip"></div>
+      <p class="modal-titulo" id="pedidoModalTitulo">Nuevo pedido</p>
+      <p class="modal-sub" id="pedidoModalSub"></p>
+    </div>
     <div id="pedidoModalContenido"></div>
   </div>
 </div>
@@ -13420,6 +13423,20 @@
       document.getElementById('modalOverlay').classList.add('hidden');
       document.querySelector('#modalOverlay .modal-box')?.classList.remove('modal-box-mitad');
     }
+  }
+
+  // El encabezado del modal de pedido (pestañas para navegar entre pedidos abiertos + título +
+  // subtítulo) queda fijo (sticky) arriba al hacer scroll dentro de la ficha. Su alto cambia
+  // seguido (más o menos pestañas abiertas, buscador de pestañas abierto/cerrado, título largo
+  // que se envuelve en 2 líneas...), así que en vez de un valor fijo, se observa su alto real y
+  // se empuja la barra de sub-pestañas (🧾 Datos / 🧩 Equipos / 🚚 Envío, que también es sticky)
+  // justo debajo, para que ambas queden visibles a la vez sin taparse entre sí.
+  const _pedidoHeaderStickyEl=document.getElementById('pedidoModalHeaderSticky');
+  if(_pedidoHeaderStickyEl&&typeof ResizeObserver!=='undefined'){
+    new ResizeObserver(entries=>{
+      const h=entries[0]?.target?.offsetHeight||0;
+      document.documentElement.style.setProperty('--pedido-header-h',h+'px');
+    }).observe(_pedidoHeaderStickyEl);
   }
 
 </script>  <script>
