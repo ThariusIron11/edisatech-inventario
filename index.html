@@ -278,7 +278,10 @@
     /* ── SUBPESTAÑAS (Config) ── */
     .subtabs{display:flex;gap:4px;margin-bottom:18px;border-bottom:1.5px solid #eee;flex-wrap:wrap;}
     #pedidoModalHeaderSticky{position:sticky;top:0;z-index:6;background:#fff;}
-    .modal-box .subtabs{position:sticky;top:var(--pedido-header-h,0px);z-index:5;background:#fff;}
+    .modal-box .subtabs{position:sticky;top:0;z-index:5;background:#fff;}
+    #pedidoSubtabsWrap{position:sticky;top:var(--pedido-header-h,0px);z-index:5;background:#fff;}
+    #pedidoSubtabsWrap .subtabs{position:static;margin-bottom:0;}
+    .equipos-header-sticky{position:sticky;top:calc(var(--pedido-header-h,0px) + var(--pedido-subtabs-h,0px));z-index:4;background:#fff;padding:8px 0;}
     .subtab-btn{padding:10px 14px;border:none;background:transparent;color:#888;font-size:13px;font-weight:600;cursor:pointer;border-bottom:2.5px solid transparent;margin-bottom:-1.5px;transition:all 0.2s;white-space:nowrap;}
     .subtab-btn.active{color:#1b2a1b;border-bottom-color:#1b2a1b;}
     .subtab-btn:hover:not(.active){color:#1b2a1b;}
@@ -7697,7 +7700,7 @@
     html='';
 
     // Items
-    html+=`<div style="display:flex;align-items:center;justify-content:space-between;">
+    html+=`<div class="equipos-header-sticky" style="display:flex;align-items:center;justify-content:space-between;">
         <p class="sub-label" style="margin-bottom:0;">Equipos del pedido</p>
         ${(pedidoActual.items||[]).length>0?`<button type="button" class="btn-sm" style="background:#f0f0f0;color:#555;" onclick="toggleAccionesPedido()">${pedidoAccionesVisibles?'🙈 Ocultar opciones':'👁️ Mostrar opciones'}</button>`:''}
       </div>`;
@@ -8131,16 +8134,24 @@
     const htmlAcciones=html;
 
     cont.innerHTML=`
-      ${esReparacion&&pedidoActual.reparacionId?`<button type="button" class="btn-sm" style="background:#6a1b9a;color:#fff;margin-bottom:14px;" onclick="verFichaReparacionDesdePedido('${pedidoActual.reparacionId}')">🔧 Ver ficha de reparación</button>`:''}
-      <div class="subtabs" style="margin-bottom:14px;">
-        <button type="button" class="subtab-btn ${pedidoModalTab==='datos'?'active':''}" onclick="cambiarTabPedido('datos')">🧾 Datos</button>
-        ${!pedidoEnvioFocoKey?`<button type="button" class="subtab-btn ${pedidoModalTab==='equipos'?'active':''}" onclick="cambiarTabPedido('equipos')">🧩 Equipos</button>`:''}
-        ${!esNuevo?`<button type="button" class="subtab-btn ${pedidoModalTab==='envio'?'active':''}" onclick="cambiarTabPedido('envio')">🚚 Envío</button>`:''}
+      <div id="pedidoSubtabsWrap">
+        ${esReparacion&&pedidoActual.reparacionId?`<button type="button" class="btn-sm" style="background:#6a1b9a;color:#fff;margin-bottom:14px;" onclick="verFichaReparacionDesdePedido('${pedidoActual.reparacionId}')">🔧 Ver ficha de reparación</button>`:''}
+        <div class="subtabs" style="margin-bottom:14px;">
+          <button type="button" class="subtab-btn ${pedidoModalTab==='datos'?'active':''}" onclick="cambiarTabPedido('datos')">🧾 Datos</button>
+          ${!pedidoEnvioFocoKey?`<button type="button" class="subtab-btn ${pedidoModalTab==='equipos'?'active':''}" onclick="cambiarTabPedido('equipos')">🧩 Equipos</button>`:''}
+          ${!esNuevo?`<button type="button" class="subtab-btn ${pedidoModalTab==='envio'?'active':''}" onclick="cambiarTabPedido('envio')">🚚 Envío</button>`:''}
+        </div>
       </div>
       <div style="display:${pedidoModalTab==='datos'?'block':'none'};">${htmlDatos}</div>
       ${!pedidoEnvioFocoKey?`<div style="display:${pedidoModalTab==='equipos'?'block':'none'};">${htmlEquipos}</div>`:''}
       ${!esNuevo?`<div style="display:${pedidoModalTab==='envio'?'block':'none'};">${pedidoEnvioFocoKey?construirHtmlEnvioFoco(pedidoEnvioFocoKey):construirHtmlEnvio(cancelado)}</div>`:''}
       ${pedidoEnvioFocoKey?'':htmlAcciones}`;
+    // El wrapper de subtabs (y el botón de reparación cuando aplica) es sticky justo debajo del
+    // encabezado de pestañas/título. Medimos su alto real después de pintarlo para empujar la
+    // barra "Equipos del pedido · 👁️ Mostrar opciones" (también sticky) exactamente debajo, sin
+    // taparse, sin importar si el botón de reparación está presente o cuánto midan las subtabs.
+    const _subtabsWrapEl=document.getElementById('pedidoSubtabsWrap');
+    if(_subtabsWrapEl) document.documentElement.style.setProperty('--pedido-subtabs-h',_subtabsWrapEl.offsetHeight+'px');
   }
 
   window.onInputPedidoCliente=function(){
