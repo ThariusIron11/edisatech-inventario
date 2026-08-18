@@ -1268,6 +1268,19 @@
   let nuevoEmpEncargados=[]; // chips temporales del formulario "nueva empresa"
   let editEmpEncargados=[]; // chips temporales del modal de edición
   let pedidoActual=null; // para el modal de pedido
+  // BUG que esto corrige: muchas acciones sobre un pedido (asignar/quitar motor, reductor,
+  // brazo de reacción, eje sólido; retirar equipos; editar cantidad/OC; etc.) buscaban el
+  // pedido en el arreglo global `pedidos` — que se llena vía onSnapshot de Firestore y puede
+  // llegar con un pequeño retraso respecto a lo que ya se ve/editó en pantalla. Si el pedido que
+  // se está editando es justo el que está abierto en la ficha (pedidoActual), hay que usar
+  // SIEMPRE pedidoActual — es la copia más al día que existe — en vez de la versión de `pedidos`
+  // que puede estar desactualizada. Si la acción es sobre otro pedido (no el que está abierto),
+  // sigue buscando en `pedidos` como antes. Sin esto: se reservaba stock del equipo (ej: brazo
+  // de reacción) pero el ítem quedaba sin guardar en el pedido correcto — dejando una reserva
+  // "huérfana" que ningún pedido reclama.
+  function pedidoParaEditar(pedidoId){
+    return (pedidoActual&&pedidoActual.id===pedidoId)?pedidoActual:pedidos.find(x=>x.id===pedidoId);
+  }
   let pedidoSerieAbierta=new Set(); // índices de ítems con el panel de series desplegado
   let piezasUsadasAbierta=new Set(); // claves "itemIdx_unidadIdx" con el panel de piezas usadas desplegado (uso general, no reparación)
   let piezasReparacionAbierta=new Set(); // claves "itemIdx_parte" con el panel de piezas para reparar/armar desplegado (solo ítems de reparación)
@@ -4412,7 +4425,7 @@
     try{
       const input=document.getElementById(`asignarInput-${equipoId}-${itemIndex}-${pedidoId}-${parte||'x'}`);
       const monto=parseInt(input?.value)||0;
-      const p=pedidos.find(x=>x.id===pedidoId);
+      const p=pedidoParaEditar(pedidoId);
       if(!p){toast('Pedido no encontrado',true);return;}
       const item=(p.items||[])[itemIndex];
       if(!item){toast('Ítem no encontrado',true);return;}
@@ -4482,7 +4495,7 @@
     if(asignacionesEnCurso.has(claveOp)) return;
     asignacionesEnCurso.add(claveOp);
     try{
-      const p=pedidos.find(x=>x.id===pedidoId);
+      const p=pedidoParaEditar(pedidoId);
       if(!p){toast('Pedido no encontrado',true);return;}
       const item=(p.items||[])[itemIndex];
       if(!item||!item.compuesto){toast('Ítem no encontrado',true);return;}
@@ -4549,7 +4562,7 @@
   // Libera cantidad ya "cubierta" (reservada) de un ítem de pedido de vuelta a disponible,
   // por si cambia el orden de entrega y ese stock se necesita para otro pedido primero.
   window.desasignarPedidoItem=async function(pedidoId,itemIndex){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     const item=(p.items||[])[itemIndex];
     if(!item){toast('Ítem no encontrado',true);return;}
@@ -4599,7 +4612,7 @@
 
   // ── MOTOREDUCTOR: asignar/desasignar el motor o el reductor de un ítem ──
   window.abrirAsignarComponente=function(pedidoId,itemIndex,parte){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     const item=(p.items||[])[itemIndex];
     if(!item){toast('Ítem no encontrado',true);return;}
@@ -4636,7 +4649,7 @@
   window.confirmarAsignarComponente=async function(pedidoId,itemIndex,parte){
     const eqId=asignarComponenteId;
     if(!eqId){toast('Selecciona un equipo',true);return;}
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     const item=(p.items||[])[itemIndex];
     if(!item){toast('Ítem no encontrado',true);return;}
@@ -4664,7 +4677,7 @@
   // Para un motoreductor que se creó sin marcar "tiene brazo de reacción" (se olvidó al
   // agregarlo) — lo convierte para que se le pueda asignar un brazo, sin tener que recrear el equipo.
   window.adicionarBrazoAMotoreductor=async function(pedidoId,itemIndex){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     const item=(p.items||[])[itemIndex];
     if(!item||item.equipoTipo!=='motoreductor'){toast('Ítem no válido',true);return;}
@@ -4681,7 +4694,7 @@
   // Quita por completo el brazo de reacción de un motoreductor, dejándolo como estaba
   // antes de adicionárselo (libera el stock reservado si ya había uno asignado).
   window.quitarBrazoDeMotoreductor=async function(pedidoId,itemIndex){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     const item=(p.items||[])[itemIndex];
     if(!item||!item.tieneBrazo){toast('Este motoreductor no tiene brazo de reacción',true);return;}
@@ -4704,7 +4717,7 @@
   // (otra parte opcional e independiente del brazo — un motoreductor puede tener ambos, uno,
   // o ninguno).
   window.adicionarEjeSolidoAMotoreductor=async function(pedidoId,itemIndex){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     const item=(p.items||[])[itemIndex];
     if(!item||item.equipoTipo!=='motoreductor'){toast('Ítem no válido',true);return;}
@@ -4719,7 +4732,7 @@
   }
 
   window.quitarEjeSolidoDeMotoreductor=async function(pedidoId,itemIndex){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     const item=(p.items||[])[itemIndex];
     if(!item||!item.tieneEjeSolido){toast('Este motoreductor no tiene eje sólido',true);return;}
@@ -4739,7 +4752,7 @@
   }
 
   window.desasignarComponenteMotoreductor=async function(pedidoId,itemIndex,parte){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     const item=(p.items||[])[itemIndex];
     if(!item){toast('Ítem no encontrado',true);return;}
@@ -4769,7 +4782,7 @@
 
   let reemplazoReparacionEquipoId=null;
   window.abrirReemplazoParteReparacion=function(pedidoId,itemIndex,parte){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     const item=(p.items||[])[itemIndex];
     if(!item||!item.deReparacion){toast('Ítem no válido',true);return;}
@@ -4806,7 +4819,7 @@
   window.confirmarReemplazoParteReparacion=async function(pedidoId,itemIndex,parte){
     const eqId=reemplazoReparacionEquipoId;
     if(!eqId){toast('Selecciona un equipo',true);return;}
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     const item=(p.items||[])[itemIndex];
     if(!item||!item.deReparacion){toast('Ítem no válido',true);return;}
@@ -4992,7 +5005,7 @@
 
   let armarMotoreductorEquipoId=null;
   window.abrirArmarMotoreductorReparacion=function(pedidoId,itemIndex){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     const item=(p.items||[])[itemIndex];
     if(!item||!item.deReparacion||item.equipoTipo==='motoreductor'){toast('Ítem no válido',true);return;}
@@ -5030,7 +5043,7 @@
   window.confirmarArmarMotoreductorReparacion=async function(pedidoId,itemIndex){
     const eqId=armarMotoreductorEquipoId;
     if(!eqId){toast('Selecciona un equipo',true);return;}
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     const item=(p.items||[])[itemIndex];
     if(!item||!item.deReparacion||item.equipoTipo==='motoreductor'){toast('Ítem no válido',true);return;}
@@ -5075,7 +5088,7 @@
   // (primero hay que retirar el reemplazo), o si el conjunto tiene brazo/eje sólido asignado (se
   // deben quitar esos accesorios primero, ya que no aplican a una pieza suelta).
   window.entregarSoloParteReparacion=async function(pedidoId,itemIndex,parteAQuedar){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     const item=(p.items||[])[itemIndex];
     if(!item||!item.deReparacion||item.equipoTipo!=='motoreductor'){toast('Ítem no válido',true);return;}
@@ -5113,7 +5126,7 @@
   // queda enlazado al índice del otro (separadoDeReparacionCon) para que "🔁 Restablecer" pueda
   // deshacer la división completa desde cualquiera de los dos.
   window.dividirReparacionEnPartes=async function(pedidoId,itemIndex){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     const item=(p.items||[])[itemIndex];
     if(!item||!item.deReparacion||item.equipoTipo!=='motoreductor'){toast('Ítem no válido',true);return;}
@@ -5151,7 +5164,7 @@
   // "todoCompleto" que despacharEnvioDePedido/finalizarRetiroItemPedido, replicado aquí porque
   // además hay que completar la reparación (cosa que finalizarRetiroItemPedido no hace).
   window.marcarParteReparacionIrreparable=async function(pedidoId,itemIndex){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     const item=(p.items||[])[itemIndex];
     if(!item||!item.deReparacion||item.equipoTipo==='motoreductor'){toast('Ítem no válido',true);return;}
@@ -5349,7 +5362,7 @@
     if(!eq){ toast('Esa pieza ya no existe en el catálogo',true); return; }
     if((eq.disponible||0)<cantidad){ toast(`Solo hay ${eq.disponible||0} disponibles de "${eq.nombre}"`,true); return; }
 
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){ toast('Pedido no encontrado',true); return; }
     const item=(p.items||[])[itemIdx];
     if(!item||!item.unidades||!item.unidades[unidadIdx]){ toast('Unidad no encontrada',true); return; }
@@ -5382,7 +5395,7 @@
   // reductor/motoreductor en el catálogo. Al despachar, esa unidad genera una ficha de salida
   // amarilla "ARMADO" en vez de la salida normal, con la lista de piezas usadas adjunta.
   window.abrirMarcarArmado=function(pedidoId,itemIndex){
-    const p=pedidos.find(x=>x.id===pedidoId)||pedidoActual;
+    const p=pedidoParaEditar(pedidoId);
     const item=(p?.items||[])[itemIndex];
     if(!item||!(item.unidades||[]).length){toast('Este ítem no tiene unidades con serie',true);return;}
     const filas=item.unidades.map((u,j)=>{
@@ -5413,7 +5426,7 @@
   }
 
   window.guardarMarcarArmado=async function(pedidoId,itemIndex){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p) return;
     const item=(p.items||[])[itemIndex];
     if(!item) return;
@@ -5468,7 +5481,7 @@
   }
 
   window.quitarPiezaUsadaUnidad=async function(pedidoId,itemIdx,unidadIdx,piezaIdx){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p) return;
     const item=(p.items||[])[itemIdx];
     const unidad=item?.unidades?.[unidadIdx];
@@ -5589,7 +5602,7 @@
     if(!eq){ toast('Esa pieza ya no existe en el catálogo',true); return; }
     if((eq.disponible||0)<cantidad){ toast(`Solo hay ${eq.disponible||0} disponibles de "${eq.nombre}"`,true); return; }
 
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){ toast('Pedido no encontrado',true); return; }
     const item=(p.items||[])[itemIdx];
     if(!item){ toast('Ítem no encontrado',true); return; }
@@ -5620,7 +5633,7 @@
   }
 
   window.quitarPiezaReparacion=async function(pedidoId,itemIdx,parte,piezaIdx){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p) return;
     const item=(p.items||[])[itemIdx];
     const pz=item?.piezasReparacion?.[parte]?.[piezaIdx];
@@ -5668,7 +5681,7 @@
   // "foto" del estado inicial). No se puede usar si ya se despachó algo de este equipo o de
   // cualquier pieza vinculada (reemplazo/armado): primero hay que deshacer el envío.
   window.resetearReparacionPedido=async function(pedidoId,itemIndex){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     const item=(p.items||[])[itemIndex];
     if(!item||!item.deReparacion){toast('Ítem no válido',true);return;}
@@ -5775,7 +5788,7 @@
   }
 
   window.generarUnidadesItemPedido=async function(pedidoId,itemIndex){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p) return;
     const item=(p.items||[])[itemIndex];
     if(!item) return;
@@ -5821,7 +5834,7 @@
   }
 
   window.actualizarSerialUnidad=async function(pedidoId,itemIndex,unidadIndex,campo,valor){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p) return;
     if(p.estado==='completo'){toast('Este pedido ya fue enviado y no se puede editar',true);renderModalPedido();return;}
     const item=(p.items||[])[itemIndex];
@@ -5873,7 +5886,7 @@
 
   // Agrega/quita el tercer campo editable (ubicación de envío) de una unidad específica.
   window.agregarLocacionUnidad=async function(pedidoId,itemIndex,unidadIndex){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     if(p.estado==='completo'){toast('Este pedido ya fue enviado y no se puede editar',true);return;}
     const item=(p.items||[])[itemIndex];
@@ -5889,7 +5902,7 @@
   }
 
   window.quitarLocacionUnidad=async function(pedidoId,itemIndex,unidadIndex){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     if(p.estado==='completo'){toast('Este pedido ya fue enviado y no se puede editar',true);return;}
     const item=(p.items||[])[itemIndex];
@@ -5907,7 +5920,7 @@
 
 
   window.editarCantidadItemPedido=async function(pedidoId,itemIndex){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     if(p.estado==='completo'){toast('Este pedido ya fue enviado y no se puede editar',true);return;}
     const item=(p.items||[])[itemIndex];
@@ -5931,7 +5944,7 @@
 
   // Edita la orden de compra del cliente asociada a esta línea del pedido (opcional).
   window.editarOrdenCompraItemPedido=async function(pedidoId,itemIndex){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     const item=(p.items||[])[itemIndex];
     if(!item){toast('Ítem no encontrado',true);return;}
@@ -5947,7 +5960,7 @@
   // Aplica el cambio de cantidad y libera stock reservado de más si corresponde.
   // Si se pasa unidadesForzadas (array), se usa tal cual en vez de recalcularla automáticamente.
   async function aplicarNuevaCantidadItem(pedidoId,itemIndex,nueva,unidadesForzadas){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p) return;
     const item=(p.items||[])[itemIndex];
     if(!item) return;
@@ -6073,7 +6086,7 @@
 
   // Modal para elegir exactamente cuáles unidades (con su serial) se retiran al bajar la cantidad
   window.abrirSeleccionUnidadesARetirar=function(pedidoId,itemIndex,nuevaCantidad){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p) return;
     const item=(p.items||[])[itemIndex];
     if(!item) return;
@@ -6100,7 +6113,7 @@
   }
 
   window.confirmarRetiroUnidadesPedido=async function(pedidoId,itemIndex,nuevaCantidad){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p) return;
     const item=(p.items||[])[itemIndex];
     if(!item) return;
@@ -6152,7 +6165,7 @@
   }
 
   window.retirarItemPedido=async function(pedidoId,itemIndex){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p){toast('Pedido no encontrado',true);return;}
     const item=(p.items||[])[itemIndex];
     if(!item){toast('Ítem no encontrado',true);return;}
@@ -8558,7 +8571,7 @@
   async function guardarItemsPedidoGrupoSet(pedidoId,updItems){
     if(pedidoId){
       await updateDoc(doc(db,'inv_pedidos',pedidoId),{items:updItems});
-      const p=pedidos.find(x=>x.id===pedidoId); if(p) p.items=updItems;
+      const p=pedidoParaEditar(pedidoId); if(p) p.items=updItems;
     }
     if(!pedidoId||pedidoActual.id===pedidoId){ pedidoActual.items=updItems; }
   }
@@ -8567,7 +8580,7 @@
   // retirar cualquier equipo: libera el stock reservado que tuvieran y los quita del pedido.
   // Funciona tanto en un pedido ya guardado como en el borrador de uno nuevo.
   window.retirarGrupoSetSprocket=async function(pedidoId,grupoSetId){
-    const p=pedidoId?(pedidos.find(x=>x.id===pedidoId)):pedidoActual;
+    const p=pedidoId?pedidoParaEditar(pedidoId):pedidoActual;
     if(pedidoId&&!p){toast('Pedido no encontrado',true);return;}
     const items=(p||pedidoActual).items||[];
     const idxs=indicesDeGrupoSetSprocket(items,grupoSetId);
@@ -8595,7 +8608,7 @@
 
   // Edita la orden de compra del cliente para TODOS los componentes del set a la vez.
   window.editarOrdenCompraGrupoSetSprocket=async function(pedidoId,grupoSetId){
-    const p=pedidoId?(pedidos.find(x=>x.id===pedidoId)):pedidoActual;
+    const p=pedidoId?pedidoParaEditar(pedidoId):pedidoActual;
     if(pedidoId&&!p){toast('Pedido no encontrado',true);return;}
     const items=(p||pedidoActual).items||[];
     const idxs=indicesDeGrupoSetSprocket(items,grupoSetId);
@@ -8613,7 +8626,7 @@
   // para TODOS los componentes del set a la vez. Es un campo simple del ítem (ubicacionEnvio),
   // no depende de que el componente tenga números de serie.
   window.editarLocalizacionGrupoSetSprocket=async function(pedidoId,grupoSetId){
-    const p=pedidoId?(pedidos.find(x=>x.id===pedidoId)):pedidoActual;
+    const p=pedidoId?pedidoParaEditar(pedidoId):pedidoActual;
     if(pedidoId&&!p){toast('Pedido no encontrado',true);return;}
     if(p&&p.estado==='completo'){toast('Este pedido ya fue enviado y no se puede editar',true);return;}
     const items=(p||pedidoActual).items||[];
@@ -8632,7 +8645,7 @@
   // exceso de reserva de cada uno si corresponde (misma lógica que editarCantidadItemPedido,
   // aplicada a las 2-3 líneas del set en conjunto).
   window.editarCantidadGrupoSetSprocket=async function(pedidoId,grupoSetId){
-    const p=pedidoId?(pedidos.find(x=>x.id===pedidoId)):pedidoActual;
+    const p=pedidoId?pedidoParaEditar(pedidoId):pedidoActual;
     if(pedidoId&&!p){toast('Pedido no encontrado',true);return;}
     if(p&&p.estado==='completo'){toast('Este pedido ya fue enviado y no se puede editar',true);return;}
     const items=(p||pedidoActual).items||[];
@@ -8679,7 +8692,7 @@
   // Desvincula TODOS los componentes del set del equipo al que estaban montados de una sola vez
   // — vuelve a mostrarse suelto, bajo su propio encabezado "Set Sprocket".
   window.desvincularGrupoSetSprocket=async function(pedidoId,grupoSetId){
-    const p=pedidoId?(pedidos.find(x=>x.id===pedidoId)):pedidoActual;
+    const p=pedidoId?pedidoParaEditar(pedidoId):pedidoActual;
     if(pedidoId&&!p){toast('Pedido no encontrado',true);return;}
     const items=(p||pedidoActual).items||[];
     const idxs=indicesDeGrupoSetSprocket(items,grupoSetId);
@@ -8889,7 +8902,7 @@
   // en el pedido, solo que vuelve a mostrarse suelto (agrupado bajo su propio encabezado "Set
   // Sprocket" si comparte grupoSetId con otros componentes).
   window.desvincularSetSprocketItem=async function(pedidoId,itemIndex){
-    const p=pedidoId?(pedidos.find(x=>x.id===pedidoId)||pedidoActual):pedidoActual;
+    const p=pedidoId?pedidoParaEditar(pedidoId):pedidoActual;
     const item=(p.items||[])[itemIndex];
     if(!item){toast('Ítem no encontrado',true);return;}
     if(!confirm('¿Desvincular este componente del equipo? Sigue en el pedido, pero se mostrará suelto.')) return;
@@ -9541,7 +9554,7 @@
   // han devuelto a este pedido hasta ahora (sin importar cuántas veces se haya registrado una
   // devolución) — se abre desde el chip "↩️ Devolución" en la lista de Pedidos.
   window.abrirFichaDevolucionPedido=function(pedidoId){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p) return;
 
     const bloques=(p.items||[]).map((item,i)=>{
@@ -9582,7 +9595,7 @@
   }
 
   window.abrirDevolucionPedido=function(pedidoId){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p) return;
     if(!pedidoTieneAlgoPorDevolver(p)){ toast('Ya no queda nada por devolver en este pedido',true); return; }
 
@@ -9635,7 +9648,7 @@
   }
 
   window.confirmarDevolucionPedido=async function(pedidoId){
-    const p=pedidos.find(x=>x.id===pedidoId);
+    const p=pedidoParaEditar(pedidoId);
     if(!p) return;
 
     const unidadesSeleccionadas=Array.from(document.querySelectorAll('.chk-devolver-unidad:checked'))
