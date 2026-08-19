@@ -10061,7 +10061,16 @@
         nombre:nombreEquipo, tipo:tipoObj.valor, variante, localizacion:etiquetaLoc(locObj), disponible:cantidad, reservado:0, observacion:''
       });
       equipoId=ref.id; equipoNombre=nombreConVariante({nombre:nombreEquipo,variante});
-      equipos.push({id:equipoId, nombre:nombreEquipo, tipo:tipoObj.valor, variante, localizacion:etiquetaLoc(locObj), disponible:cantidad, reservado:0, observacion:''});
+      // BUG que esto corrige: para cuando el equipo es nuevo (no existía en el catálogo), este
+      // push local competía con el eco del listener de Firestore (onSnapshot en 'inv_equipos',
+      // que reemplaza el arreglo `equipos` completo apenas confirma el nuevo documento). Si el
+      // eco llegaba antes de este push (algo común, no siempre tarda), el equipo terminaba dos
+      // veces en el arreglo local — se veía duplicado al buscarlo en Inventario, hasta que
+      // recargabas la página (que sí arranca desde una copia limpia). Mismo resguardo que ya
+      // tenía "Catálogo → Nuevo equipo": solo empujar si el eco todavía no lo agregó.
+      if(!equipos.find(e=>e.id===equipoId)){
+        equipos.push({id:equipoId, nombre:nombreEquipo, tipo:tipoObj.valor, variante, localizacion:etiquetaLoc(locObj), disponible:cantidad, reservado:0, observacion:''});
+      }
     }
     renderInventario(); renderResumen(); renderCatalogoEquipos(); renderRadar(); renderRadarAlertas(); renderPendientesAsignar(); renderGruposPeso();
 
