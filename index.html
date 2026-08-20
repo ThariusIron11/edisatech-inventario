@@ -9494,11 +9494,15 @@
     // Historial plano de remisiones del pedido (para la sección de Remisiones en Equipos). Se
     // conservan itemIndex/tipo/unidadIndices/cantidad (además de equipoNombre para mostrar) para
     // poder recalcular el peso en vivo también aquí, aunque ya esté despachada.
+    // BUG que esto corrige: reg.unidadIndices solo existe cuando el registro es por serial
+    // (reg.tipo==='serial'); para un registro normal (por cantidad) queda en undefined, y
+    // Firestore rechaza guardar un documento con un campo en undefined — por eso el pedido no
+    // se llegaba a marcar como despachado/completo. Con ||null queda un valor válido.
     const nuevasRemisiones=(envio.remisiones||[]).map(r=>({
       remision:r.remision, fecha:r.fecha,
       items:(r.items||[]).map(reg=>({
         equipoNombre:reg.equipoNombre, cantidad:reg.tipo==='serial'?(reg.unidadIndices||[]).length:reg.cantidad,
-        itemIndex:reg.itemIndex, tipo:reg.tipo, unidadIndices:reg.unidadIndices
+        itemIndex:reg.itemIndex, tipo:reg.tipo, unidadIndices:reg.unidadIndices||null
       })),
       empresa:envio.empresa, remesa:envio.remesa,
       ...(r.pesoTotal?{pesoTotal:r.pesoTotal}:{})
@@ -9528,10 +9532,10 @@
     const algunoDespachado=updItems.some(i=>(i.despachado||0)>0);
     const estadoNuevo=todoCompleto?'completo':algunoDespachado?'parcial':'proceso';
 
-    await updateDoc(doc(db,'inv_pedidos',pedido.id),{
+    await updateDoc(doc(db,'inv_pedidos',pedido.id),limpiarUndefined({
       items:updItems, remisiones, envios:enviosNuevos, estado:estadoNuevo,
       ...(todoCompleto?{fechaCompleto:serverTimestamp()}:{})
-    });
+    }));
 
     // Refleja el cambio de inmediato en los datos locales (mapas + array `pedidos`), sin esperar
     // al eco en tiempo real de Firestore — en algunas sesiones/PWA ese eco tarda o no llega hasta
