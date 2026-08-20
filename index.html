@@ -1086,6 +1086,21 @@
     });
   }
 
+  // Firestore rechaza guardar cualquier campo en `undefined` (a diferencia de `null`, que sí es
+  // válido) — lanza "Unsupported field value: undefined". Antes de guardar en lote, se reemplaza
+  // cualquier undefined suelto (incluso dentro de objetos/arreglos anidados, ej: piezasArmado)
+  // por null, como red de seguridad además de arreglar la causa puntual donde aparecía. No toca
+  // valores especiales de Firestore como serverTimestamp() — solo objetos y arreglos "normales".
+  function limpiarUndefined(valor){
+    if(Array.isArray(valor)) return valor.map(limpiarUndefined);
+    if(valor&&typeof valor==='object'&&Object.getPrototypeOf(valor)===Object.prototype){
+      const limpio={};
+      for(const k of Object.keys(valor)) limpio[k]=(valor[k]===undefined)?null:limpiarUndefined(valor[k]);
+      return limpio;
+    }
+    return valor;
+  }
+
   // Crea muchos documentos nuevos en una sola operación (o pocas, si se pasa del límite de
   // Firestore) en vez de una escritura por documento esperando cada una por turno. Además de
   // ser mucho más rápido, es "todo o nada": si algo falla, no queda ningún documento a medias
@@ -1097,7 +1112,7 @@
     for(let i=0;i<items.length;i+=LIMITE){
       const tanda=items.slice(i,i+LIMITE);
       const batch=writeBatch(db);
-      tanda.forEach(data=>batch.set(doc(collection(db,coleccion)),data));
+      tanda.forEach(data=>batch.set(doc(collection(db,coleccion)),limpiarUndefined(data)));
       await batch.commit();
     }
   }
@@ -1656,10 +1671,14 @@
       // sigue siendo el equipo original del cliente (equipoId null) — no se debe perder al
       // filtrar, porque también tiene que salir registrada (como movimiento de reparación,
       // sin descontar stock) cuando se despache junto con la parte nueva.
+      // BUG que esto corrige: `item.motor?.equipoId` cuando no hay equipo asignado da
+      // `undefined`, no `null` — y Firestore rechaza guardar un campo en `undefined`
+      // ("Unsupported field value: undefined"). Con ||null queda explícitamente null, que sí es
+      // un valor válido para Firestore (así lo hace ya el caso de arriba, item.deReparacion).
       const conservarSinEquipo=!!item.reemplazoDeReparacion;
       return [
-        {equipoId:item.motor?.equipoId,equipoNombre:'🧩 '+(item.motor?.equipoNombre||''),cantidad:qty},
-        {equipoId:item.reductor?.equipoId,equipoNombre:'🧩 '+(item.reductor?.equipoNombre||''),cantidad:qty},
+        {equipoId:item.motor?.equipoId||null,equipoNombre:'🧩 '+(item.motor?.equipoNombre||''),cantidad:qty},
+        {equipoId:item.reductor?.equipoId||null,equipoNombre:'🧩 '+(item.reductor?.equipoNombre||''),cantidad:qty},
         ...(item.tieneBrazo&&item.brazo?.equipoId?[{equipoId:item.brazo.equipoId,equipoNombre:'🧩 '+item.brazo.equipoNombre,cantidad:qty}]:[]),
         ...(item.tieneEjeSolido&&item.eje_solido?.equipoId?[{equipoId:item.eje_solido.equipoId,equipoNombre:'🧩 '+item.eje_solido.equipoNombre,cantidad:qty}]:[])
       ].filter(p=>p.equipoId||conservarSinEquipo);
