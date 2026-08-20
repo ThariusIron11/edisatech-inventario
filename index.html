@@ -1028,7 +1028,7 @@
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp, query, orderBy, increment, getDoc, getDocs, limit, where, enableNetwork, disableNetwork, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp, query, orderBy, increment, getDoc, getDocs, limit, where, enableNetwork, disableNetwork, runTransaction, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
   import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
   const firebaseConfig = {
@@ -1084,6 +1084,22 @@
       const resActual=data.reservado||0;
       tx.update(ref,{reservado:Math.max(0,resActual-cantidad)});
     });
+  }
+
+  // Crea muchos documentos nuevos en una sola operación (o pocas, si se pasa del límite de
+  // Firestore) en vez de una escritura por documento esperando cada una por turno. Además de
+  // ser mucho más rápido, es "todo o nada": si algo falla, no queda ningún documento a medias
+  // escrito — antes, con un addDoc por turno, un fallo a mitad de una tanda grande dejaba
+  // algunos movimientos ya guardados y otros no.
+  async function crearDocumentosEnLotes(coleccion,items){
+    if(!items||items.length===0) return;
+    const LIMITE=450; // margen bajo el límite real de 500 operaciones por lote de Firestore
+    for(let i=0;i<items.length;i+=LIMITE){
+      const tanda=items.slice(i,i+LIMITE);
+      const batch=writeBatch(db);
+      tanda.forEach(data=>batch.set(doc(collection(db,coleccion)),data));
+      await batch.commit();
+    }
   }
 
   // ── RECONEXIÓN DEL CANAL EN TIEMPO REAL DE FIRESTORE ──
@@ -9311,7 +9327,7 @@
     });
 
     html+=`<div id="pesoDespachoTotal" style="font-size:13px;color:#555;margin:10px 0;"></div>
-      <button class="btn-primary" style="background:#2e7d32;margin-top:8px;" onclick="confirmarDespacho()">✓ Confirmar despacho</button>
+      <button id="btnConfirmarDespacho" class="btn-primary" style="background:#2e7d32;margin-top:8px;" onclick="confirmarDespacho()">✓ Confirmar despacho</button>
       <button class="btn-secondary" onclick="abrirPedido('${pedidoActual.id}')">← Volver</button>`;
 
     cont.innerHTML=html;
@@ -9424,13 +9440,19 @@
 
     // Bajar reservado (una vez por equipo físico, ya agrupado — los acoples compuestos ya vienen
     // expandidos en sus piezas dentro de qtyPorEquipo, así que se descuentan como cualquier equipo).
-    for(const equipoId of Object.keys(qtyPorEquipo)){
-      const eqComp=equipos.find(e=>e.id===equipoId);
-      if(eqComp?.compuesto) continue;
-      await descontarReservado(equipoId,qtyPorEquipo[equipoId].cantidad);
-    }
+    // En paralelo (Promise.all) en vez de una transacción esperando a la siguiente por turno —
+    // son equipos distintos, no compiten entre sí, así que no hay ganancia en hacerlas en fila.
+    await Promise.all(
+      Object.keys(qtyPorEquipo)
+        .filter(equipoId=>!(equipos.find(e=>e.id===equipoId)?.compuesto))
+        .map(equipoId=>descontarReservado(equipoId,qtyPorEquipo[equipoId].cantidad))
+    );
 
-    // Registrar movimiento por cada equipo físico, conservando a qué remisión pertenece cada uno
+    // Registrar movimiento por cada equipo físico, conservando a qué remisión pertenece cada uno.
+    // Se arman todos los documentos primero y se confirman en lotes (crearDocumentosEnLotes) en
+    // vez de un addDoc por turno esperando cada uno — en un despacho grande (muchos equipos /
+    // motoreductores desdoblados) esto puede ser la diferencia entre 1-2 escrituras y 50-100.
+    const movimientosSalida=[];
     for(const r of (envio.remisiones||[])){
       for(const reg of (r.items||[])){
         const item=items[reg.itemIndex];
@@ -9438,7 +9460,7 @@
         const qty=reg.tipo==='serial'?(reg.unidadIndices||[]).length:reg.cantidad;
         const partes=reg.tipo==='serial'?partesFisicasDeItemPorUnidades(item,reg.unidadIndices||[]):partesFisicasDeItem(item,qty);
         for(const parte of partes){
-          await addDoc(collection(db,'inv_movimientos'),{
+          movimientosSalida.push({
             tipo:'salida', equipoId:parte.equipoId, equipoNombre:parte.equipoNombre,
             cantidad:parte.cantidad, remision:r.remision, pedidoId:pedido.id,
             pedidoNombre:tituloPedido(pedido), fecha:serverTimestamp(),
@@ -9448,6 +9470,7 @@
         }
       }
     }
+    await crearDocumentosEnLotes('inv_movimientos',movimientosSalida);
 
     // Historial plano de remisiones del pedido (para la sección de Remisiones en Equipos). Se
     // conservan itemIndex/tipo/unidadIndices/cantidad (además de equipoNombre para mostrar) para
@@ -9524,27 +9547,45 @@
     const envio=pedidoActual.envios?.[ei];
     if(!envio||envio.despachado){toast('Ese envío ya no está disponible (puede que ya se haya despachado)',true);return;}
 
-    const resultado=await despacharEnvioDePedido(pedidoActual, ei);
-    if(!resultado.ok){toast(resultado.motivo||'No se pudo registrar el despacho',true);return;}
+    // Con un envío grande, despacharEnvioDePedido puede tardar unos segundos (aunque ahora
+    // mucho menos que antes, al ir en lotes en vez de escritura por escritura). Se deshabilita
+    // el botón mientras corre para evitar doble clic, y todo queda envuelto en try/catch: antes,
+    // si algo fallaba a mitad de camino (ej. la conexión se cortó), no se avisaba nada — el
+    // pedido se quedaba sin marcar como despachado/completo en silencio, sin ninguna pista de
+    // qué pasó. Ahora si falla se avisa explícitamente con el motivo.
+    const btn=document.getElementById('btnConfirmarDespacho');
+    if(btn){ btn.disabled=true; btn.textContent='Procesando…'; }
+    try{
+      const resultado=await despacharEnvioDePedido(pedidoActual, ei);
+      if(!resultado.ok){toast(resultado.motivo||'No se pudo registrar el despacho',true);return;}
 
-    // Si esta remesa está vinculada con otro(s) pedido(s), se despacha también en conjunto.
-    let vinculadosOk=0; const errores=[];
-    if(envio.vinculoId){
-      for(const p of pedidos){
-        if(p.id===pedidoActual.id) continue;
-        const idx=(p.envios||[]).findIndex(e=>e.vinculoId===envio.vinculoId && !e.despachado);
-        if(idx<0) continue;
-        const r=await despacharEnvioDePedido(p, idx);
-        if(r.ok) vinculadosOk++; else errores.push(`${p.nombre||p.numero||p.id}: ${r.motivo}`);
+      // Si esta remesa está vinculada con otro(s) pedido(s), se despacha también en conjunto.
+      let vinculadosOk=0; const errores=[];
+      if(envio.vinculoId){
+        for(const p of pedidos){
+          if(p.id===pedidoActual.id) continue;
+          const idx=(p.envios||[]).findIndex(e=>e.vinculoId===envio.vinculoId && !e.despachado);
+          if(idx<0) continue;
+          try{
+            const r=await despacharEnvioDePedido(p, idx);
+            if(r.ok) vinculadosOk++; else errores.push(`${p.nombre||p.numero||p.id}: ${r.motivo}`);
+          }catch(e){
+            errores.push(`${p.nombre||p.numero||p.id}: ${e?.message||'error inesperado'}`);
+          }
+        }
       }
-    }
 
-    if(errores.length>0){
-      toast(`✓ Despacho registrado. Aviso: no se pudo despachar en conjunto → ${errores.join(' | ')}`,true);
-    } else {
-      toast(vinculadosOk>0?`✓ Despacho registrado en conjunto (${vinculadosOk} pedido(s) vinculado(s))`:'✓ Despacho registrado');
+      if(errores.length>0){
+        toast(`✓ Despacho registrado. Aviso: no se pudo despachar en conjunto → ${errores.join(' | ')}`,true);
+      } else {
+        toast(vinculadosOk>0?`✓ Despacho registrado en conjunto (${vinculadosOk} pedido(s) vinculado(s))`:'✓ Despacho registrado');
+      }
+      cerrarPedidoTab(pedidoTabActivaKey);
+    }catch(e){
+      toast(`✕ No se pudo completar el despacho (se cortó a mitad de camino) — revisa tu conexión e inténtalo de nuevo. Detalle: ${e?.message||'error inesperado'}`,true);
+    }finally{
+      if(btn){ btn.disabled=false; btn.textContent='✓ Confirmar despacho'; }
     }
-    cerrarPedidoTab(pedidoTabActivaKey);
   }
 
   // ══════════════════════════════════════════
