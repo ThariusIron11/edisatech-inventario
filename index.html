@@ -10043,8 +10043,17 @@
 
     let equipoId, equipoNombre;
     let eqExistente=null;
-    if(entEquipoIdSeleccionado) eqExistente=equipos.find(e=>e.id===entEquipoIdSeleccionado&&e.nombre===nombreEquipo&&(e.variante||'')===variante);
-    if(!eqExistente) eqExistente=equipos.find(e=>e.nombre.toLowerCase()===nombreEquipo.toLowerCase()&&e.tipo===tipoObj.valor&&(e.variante||'').toLowerCase()===variante.toLowerCase());
+    // BUG que esto corrige: esta búsqueda NO comparaba la localización — solo nombre, tipo y
+    // variante. En Catálogo, un mismo equipo (nombre+tipo+variante) en OTRA localización es un
+    // registro aparte (así se ve en "Nuevo equipo": ahí sí compara localización). Acá no se
+    // comparaba, así que si el equipo ya existía en la Localización A y tú ingresabas una
+    // entrada indicando la Localización B, esto lo encontraba igual (por nombre/tipo/variante)
+    // y le sumaba el stock al registro de la Localización A — la entrada terminaba guardada en
+    // la localización vieja, no en la que pediste. Con la localización sumada al match: si no
+    // existe ESE equipo en ESA localización puntual, se crea un registro nuevo ahí (igual que ya
+    // hace Catálogo), en vez de reutilizar el de otra localización.
+    if(entEquipoIdSeleccionado) eqExistente=equipos.find(e=>e.id===entEquipoIdSeleccionado&&e.nombre===nombreEquipo&&(e.variante||'')===variante&&e.localizacion===etiquetaLoc(locObj));
+    if(!eqExistente) eqExistente=equipos.find(e=>e.nombre.toLowerCase()===nombreEquipo.toLowerCase()&&e.tipo===tipoObj.valor&&(e.variante||'').toLowerCase()===variante.toLowerCase()&&e.localizacion===etiquetaLoc(locObj));
 
     if(eqExistente){
       equipoId=eqExistente.id; equipoNombre=nombreConVariante(eqExistente);
