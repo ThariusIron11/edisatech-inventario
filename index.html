@@ -10057,14 +10057,23 @@
 
     if(eqExistente){
       equipoId=eqExistente.id; equipoNombre=nombreConVariante(eqExistente);
+      // BUG que esto corrige: se guardaba el valor de "disponible" ANTES de escribir, se
+      // esperaba el updateDoc, y luego se le sumaba `cantidad` a mano al arreglo local — sin
+      // fijarse si el eco de onSnapshot ya había llegado y ya lo había sumado él solo (pasa
+      // seguido: el caché local de Firestore suele reflejar el cambio casi al mismo tiempo que
+      // se resuelve este await, a veces antes). Cuando el eco llegaba primero, quedaban DOS
+      // sumas: la del eco + la manual — por eso un equipo en 0 al que le entraban 1 quedaba
+      // mostrando 2, hasta que recargabas la página (que sí arranca desde el valor real del
+      // servidor). Ahora se compara: si el valor local YA cambió mientras esperábamos (el eco
+      // se adelantó), no se vuelve a sumar; si sigue igual (el eco todavía no llega), se suma.
+      const disponibleAntes=equipos.find(e=>e.id===equipoId)?.disponible||0;
       await updateDoc(doc(db,'inv_equipos',equipoId),{
         disponible:increment(cantidad)
       });
-      // Refleja el aumento de stock de inmediato en el array local `equipos`, sin esperar al
-      // eco de onSnapshot — mismo patrón ya aplicado antes en Localizaciones/Catálogo/Despacho,
-      // porque ese eco a veces tarda o no llega hasta F5.
       const idxEq=equipos.findIndex(e=>e.id===equipoId);
-      if(idxEq>=0) equipos[idxEq]={...equipos[idxEq],disponible:(equipos[idxEq].disponible||0)+cantidad};
+      if(idxEq>=0&&(equipos[idxEq].disponible||0)===disponibleAntes){
+        equipos[idxEq]={...equipos[idxEq],disponible:disponibleAntes+cantidad};
+      }
     } else {
       const ref=await addDoc(collection(db,'inv_equipos'),{
         nombre:nombreEquipo, tipo:tipoObj.valor, variante, localizacion:etiquetaLoc(locObj), disponible:cantidad, reservado:0, observacion:''
