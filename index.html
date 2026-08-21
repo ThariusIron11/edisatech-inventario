@@ -13584,7 +13584,15 @@
 
       window.addEventListener('load', ()=>{
         huboControladorPrevio=!!navigator.serviceWorker.controller;
-        navigator.serviceWorker.register('sw.js').then(reg=>{
+        // updateViaCache:'none' — sin esto, el navegador puede conformarse con una copia de
+        // sw.js guardada en su caché HTTP normal (según los headers Cache-Control del
+        // servidor) cuando revisa si hay una versión nueva, hasta por 24 horas. Con esto, cada
+        // revisión (reg.update(), o el registro de cada apertura) va sí o sí a la red por sw.js
+        // fresco — así el resto del mecanismo de auto-actualización (más abajo) se entera a
+        // tiempo. No afecta a Firestore ni a la tasa de lecturas: es solo tráfico HTTP hacia
+        // donde está alojada la app para pedir este archivito, nada relacionado con la base de
+        // datos.
+        navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(reg=>{
           // Por defecto el navegador solo revisa si hay sw.js nuevo al navegar/recargar la
           // página. Como esta es una PWA que la gente deja abierta días enteros, forzamos
           // la revisión cada vez que vuelve a primer plano (mismo patrón que ya usa la app
