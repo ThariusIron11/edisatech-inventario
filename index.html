@@ -3045,8 +3045,38 @@
     if(resolver) resolver(null);
   }
 
+  // ── AVISO DE DATOS POSIBLEMENTE DESACTUALIZADOS ──
+  // snap.metadata.fromCache le dice a cada listener si lo que acaba de recibir vino de verdad
+  // del servidor, o es la copia local guardada porque en ese momento no hay una conexión real
+  // con Firestore — es la forma "oficial" que da el propio Firestore para saber esto (no hay
+  // que inventar nada, el dato ya viene incluido en cada snapshot). En vez de dejar a la
+  // persona viendo datos posiblemente viejos sin ninguna pista (hasta que se le ocurra
+  // recargar), se muestra un aviso mientras CUALQUIERA de los listeners esté sirviendo desde
+  // caché, y se quita solo apenas todos vuelvan a confirmar contra el servidor.
+  const listenersDesdeCache=new Set();
+  function marcarListener(nombre,fromCache){
+    if(fromCache) listenersDesdeCache.add(nombre); else listenersDesdeCache.delete(nombre);
+    actualizarBannerConexion();
+  }
+  function actualizarBannerConexion(){
+    let banner=document.getElementById('bannerSinConexion');
+    if(listenersDesdeCache.size>0){
+      if(!banner){
+        banner=document.createElement('div');
+        banner.id='bannerSinConexion';
+        banner.className='update-banner';
+        banner.style.background='#8d4b00';
+        banner.innerHTML='<span>📡 Sin conexión con el servidor — puede que no estés viendo lo último. Reconectando…</span>';
+        document.body.appendChild(banner);
+      }
+    } else if(banner){
+      banner.remove();
+    }
+  }
+
   // ── FIRESTORE LISTENERS ──
   onSnapshot(collection(db,'inv_tipos'),async snap=>{
+    marcarListener('tipos',snap.metadata.fromCache);
     if(snap.empty&&!tiposSeedIntentado){
       tiposSeedIntentado=true;
       // setDoc con id determinado (=valor) en vez de addDoc: así la siembra es idempotente — si
@@ -3094,6 +3124,7 @@
     renderInventario(); renderResumen(); renderCatalogoEquipos(); renderPedidos();
   });
   onSnapshot(query(collection(db,'inv_empresas'),orderBy('nombre')),snap=>{
+    marcarListener('empresas',snap.metadata.fromCache);
     empresas=snap.docs.map(d=>({id:d.id,...d.data()}));
     renderEmpresas();
   });
@@ -3101,14 +3132,17 @@
   // en Reparaciones y se reutilizan en futuras reparaciones con la misma descripción).
   let pesosPersonalizados=[];
   onSnapshot(collection(db,'inv_pesos_personalizados'),snap=>{
+    marcarListener('pesos_personalizados',snap.metadata.fromCache);
     pesosPersonalizados=snap.docs.map(d=>({id:d.id,...d.data()}));
   });
   onSnapshot(query(collection(db,'inv_localizaciones'),orderBy('nombre')),snap=>{
+    marcarListener('localizaciones',snap.metadata.fromCache);
     localizaciones=snap.docs.map(d=>({id:d.id,...d.data()}));
     renderLocalizaciones(); poblarSelectLoc(); renderInventario();
   });
   let internoVerificado=false;
   onSnapshot(query(collection(db,'inv_envios'),orderBy('nombre')),async snap=>{
+    marcarListener('envios',snap.metadata.fromCache);
     envios=snap.docs.map(d=>({id:d.id,...d.data()}));
     renderEnvios();
     if(!internoVerificado){
@@ -3119,6 +3153,7 @@
     }
   });
   onSnapshot(query(collection(db,'inv_equipos'),orderBy('nombre')),snap=>{
+    marcarListener('equipos',snap.metadata.fromCache);
     equipos=snap.docs.map(d=>({id:d.id,...d.data()}));
     renderInventario(); renderResumen(); renderCatalogoEquipos(); renderRadar(); renderRadarAlertas(); renderPendientesAsignar(); renderGruposPeso();
   });
@@ -3200,6 +3235,7 @@
   }
   // Pedidos en proceso/parcial: siempre completos, aunque sean viejos.
   onSnapshot(query(collection(db,'inv_pedidos'),where('estado','in',['proceso','parcial'])),snap=>{
+    marcarListener('pedidos',snap.metadata.fromCache);
     pedidosActivosMap=new Map(snap.docs.map(d=>[d.id,{id:d.id,...d.data()}]));
     recomputarPedidos();
   });
@@ -3223,10 +3259,12 @@
   iniciarListenerPedidosRecientes(window.pedHistorialCompleto);
 
   onSnapshot(query(collection(db,'inv_radar')),snap=>{
+    marcarListener('radar',snap.metadata.fromCache);
     radar=snap.docs.map(d=>({id:d.id,...d.data()}));
     renderRadar(); renderRadarAlertas();
   });
   onSnapshot(query(collection(db,'inv_simulaciones'),orderBy('fecha','desc')),snap=>{
+    marcarListener('simulaciones',snap.metadata.fromCache);
     simulaciones=snap.docs.map(d=>({id:d.id,...d.data()}));
     if(!document.getElementById('modalSimulacionEnvio')?.classList.contains('hidden')) renderSimulacionEnvio();
   });
@@ -3244,6 +3282,7 @@
   }
   // Reparaciones en proceso: siempre completas, aunque sean viejas.
   onSnapshot(query(collection(db,'inv_reparaciones'),where('estado','==','proceso')),snap=>{
+    marcarListener('reparaciones',snap.metadata.fromCache);
     reparacionesActivasMap=new Map(snap.docs.map(d=>[d.id,{id:d.id,...d.data()}]));
     recomputarReparaciones();
   });
@@ -3309,6 +3348,7 @@
     window.cargarHistorialCompletoReparaciones(true);
   }
   onSnapshot(query(collection(db,'inv_tecnicos'),orderBy('nombre')),snap=>{
+    marcarListener('tecnicos',snap.metadata.fromCache);
     tecnicos=snap.docs.map(d=>({id:d.id,...d.data()}));
     renderTecnicos();
   });
