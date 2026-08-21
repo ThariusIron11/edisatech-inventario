@@ -3053,24 +3053,40 @@
   // persona viendo datos posiblemente viejos sin ninguna pista (hasta que se le ocurra
   // recargar), se muestra un aviso mientras CUALQUIERA de los listeners esté sirviendo desde
   // caché, y se quita solo apenas todos vuelvan a confirmar contra el servidor.
+  //
+  // BUG que esto corrige: el propio heartbeat de reconexión (más abajo) apaga y prende la red
+  // a propósito cada cierto tiempo — y justo AL apagarla, TODOS los listeners reportan
+  // fromCache:true por un instante (es normal y esperado, no un problema real). Mostrar el
+  // aviso de inmediato ante eso hacía que apareciera todo el tiempo, con cada ciclo del
+  // heartbeat, en vez de solo cuando de verdad hay un problema sostenido. Con un margen de
+  // espera de unos segundos antes de mostrarlo, esos parpadeos normales (que se resuelven casi
+  // al instante) ya no alcanzan a mostrar nada — solo aparece si sigue sin resolverse pasado
+  // ese margen, que es cuando de verdad vale la pena avisar.
   const listenersDesdeCache=new Set();
+  let bannerConexionTimer=null;
   function marcarListener(nombre,fromCache){
     if(fromCache) listenersDesdeCache.add(nombre); else listenersDesdeCache.delete(nombre);
     actualizarBannerConexion();
   }
   function actualizarBannerConexion(){
-    let banner=document.getElementById('bannerSinConexion');
+    const banner=document.getElementById('bannerSinConexion');
     if(listenersDesdeCache.size>0){
-      if(!banner){
-        banner=document.createElement('div');
-        banner.id='bannerSinConexion';
-        banner.className='update-banner';
-        banner.style.background='#8d4b00';
-        banner.innerHTML='<span>📡 Sin conexión con el servidor — puede que no estés viendo lo último. Reconectando…</span>';
-        document.body.appendChild(banner);
+      if(!banner&&!bannerConexionTimer){
+        bannerConexionTimer=setTimeout(()=>{
+          bannerConexionTimer=null;
+          if(listenersDesdeCache.size===0) return; // ya se resolvió mientras esperábamos
+          if(document.getElementById('bannerSinConexion')) return;
+          const b=document.createElement('div');
+          b.id='bannerSinConexion';
+          b.className='update-banner';
+          b.style.background='#8d4b00';
+          b.innerHTML='<span>📡 Sin conexión con el servidor — puede que no estés viendo lo último. Reconectando…</span>';
+          document.body.appendChild(b);
+        },8000);
       }
-    } else if(banner){
-      banner.remove();
+    } else {
+      if(bannerConexionTimer){ clearTimeout(bannerConexionTimer); bannerConexionTimer=null; }
+      if(banner) banner.remove();
     }
   }
 
