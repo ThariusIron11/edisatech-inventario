@@ -3109,6 +3109,18 @@
     }
   }
 
+  // Sin un manejador de error, un onSnapshot que falla (permisos, índice, un corte puntual...)
+  // deja de recibir actualizaciones PARA SIEMPRE — en silencio, sin ningún aviso ni reintento
+  // — mientras los demás listeners siguen funcionando normal. Como ese quedaría marcado en
+  // listenersDesdeCache con su último estado (fromCache:true) y nunca más se actualiza, el
+  // aviso de "sin conexión" se queda pegado por ese solo, sin que un F5 sea la única forma de
+  // notarlo o arreglarlo. Con esto: queda registrado en consola CUÁL fue (para poder
+  // diagnosticarlo si vuelve a pasar) y se intenta reconectar solo.
+  function errorListener(nombre,err){
+    console.error(`[Firestore] Listener "${nombre}" falló:`,err);
+    reconectarFirestore();
+  }
+
   // ── FIRESTORE LISTENERS ──
   onSnapshot(collection(db,'inv_tipos'),async snap=>{
     marcarListener('tipos',snap.metadata.fromCache);
@@ -3157,24 +3169,24 @@
     invFiltroTipos=invFiltroTipos.filter(v=>tipos.find(t=>t.valor===v));
     renderTipos(); poblarSelectTipo(); renderInvFiltroChips();
     renderInventario(); renderResumen(); renderCatalogoEquipos(); renderPedidos();
-  });
+  },err=>errorListener('tipos',err));
   onSnapshot(query(collection(db,'inv_empresas'),orderBy('nombre')),snap=>{
     marcarListener('empresas',snap.metadata.fromCache);
     empresas=snap.docs.map(d=>({id:d.id,...d.data()}));
     renderEmpresas();
-  });
+  },err=>errorListener('empresas',err));
   // Pesos guardados para descripciones de equipo que NO están en el catálogo (se cargan/completan
   // en Reparaciones y se reutilizan en futuras reparaciones con la misma descripción).
   let pesosPersonalizados=[];
   onSnapshot(collection(db,'inv_pesos_personalizados'),snap=>{
     marcarListener('pesos_personalizados',snap.metadata.fromCache);
     pesosPersonalizados=snap.docs.map(d=>({id:d.id,...d.data()}));
-  });
+  },err=>errorListener('pesos_personalizados',err));
   onSnapshot(query(collection(db,'inv_localizaciones'),orderBy('nombre')),snap=>{
     marcarListener('localizaciones',snap.metadata.fromCache);
     localizaciones=snap.docs.map(d=>({id:d.id,...d.data()}));
     renderLocalizaciones(); poblarSelectLoc(); renderInventario();
-  });
+  },err=>errorListener('localizaciones',err));
   let internoVerificado=false;
   onSnapshot(query(collection(db,'inv_envios'),orderBy('nombre')),async snap=>{
     marcarListener('envios',snap.metadata.fromCache);
@@ -3186,12 +3198,12 @@
         await addDoc(collection(db,'inv_envios'),{nombre:'INTERNO', permanente:true});
       }
     }
-  });
+  },err=>errorListener('envios',err));
   onSnapshot(query(collection(db,'inv_equipos'),orderBy('nombre')),snap=>{
     marcarListener('equipos',snap.metadata.fromCache);
     equipos=snap.docs.map(d=>({id:d.id,...d.data()}));
     renderInventario(); renderResumen(); renderCatalogoEquipos(); renderRadar(); renderRadarAlertas(); renderPendientesAsignar(); renderGruposPeso();
-  });
+  },err=>errorListener('equipos',err));
   // ── LÍMITE DE HISTORIAL (pedidos / movimientos / reparaciones) ──
   // Para bajar lecturas de Firestore, estas 3 colecciones (las más pesadas) solo traen
   // al abrir la app los últimos LIMITE_HISTORIAL registros por fecha. Los pedidos y
@@ -3273,7 +3285,7 @@
     marcarListener('pedidos',snap.metadata.fromCache);
     pedidosActivosMap=new Map(snap.docs.map(d=>[d.id,{id:d.id,...d.data()}]));
     recomputarPedidos();
-  });
+  },err=>errorListener('pedidos',err));
   function iniciarListenerPedidosRecientes(completo){
     if(typeof unsubPedRecientes==='function') unsubPedRecientes();
     const q=completo
@@ -3297,12 +3309,12 @@
     marcarListener('radar',snap.metadata.fromCache);
     radar=snap.docs.map(d=>({id:d.id,...d.data()}));
     renderRadar(); renderRadarAlertas();
-  });
+  },err=>errorListener('radar',err));
   onSnapshot(query(collection(db,'inv_simulaciones'),orderBy('fecha','desc')),snap=>{
     marcarListener('simulaciones',snap.metadata.fromCache);
     simulaciones=snap.docs.map(d=>({id:d.id,...d.data()}));
     if(!document.getElementById('modalSimulacionEnvio')?.classList.contains('hidden')) renderSimulacionEnvio();
-  });
+  },err=>errorListener('simulaciones',err));
 
   function recomputarReparaciones(){
     const merged=new Map([...reparacionesRecientesMap,...reparacionesActivasMap]);
@@ -3320,7 +3332,7 @@
     marcarListener('reparaciones',snap.metadata.fromCache);
     reparacionesActivasMap=new Map(snap.docs.map(d=>[d.id,{id:d.id,...d.data()}]));
     recomputarReparaciones();
-  });
+  },err=>errorListener('reparaciones',err));
   function iniciarListenerReparacionesRecientes(completo){
     if(typeof unsubRepRecientes==='function') unsubRepRecientes();
     const q=completo
@@ -3386,7 +3398,7 @@
     marcarListener('tecnicos',snap.metadata.fromCache);
     tecnicos=snap.docs.map(d=>({id:d.id,...d.data()}));
     renderTecnicos();
-  });
+  },err=>errorListener('tecnicos',err));
 
   // ── RESUMEN INVENTARIO (columna 2 en escritorio, pestaña propia en móvil) ──
   function renderResumen(){
