@@ -3008,52 +3008,111 @@
   // tomar de cualquiera, PERO eso no se decide solo/automático: cuando toca reservar/asignar
   // stock para un pedido, se le pregunta al usuario de cuál ubicación sacar cada pieza que tenga
   // más de una opción. Si una pieza solo existe en una ubicación, se usa esa sin preguntar.
+  //
+  // Además, la cantidad necesaria de una pieza (ej: 2 "manzanas" por acople) NO tiene que salir
+  // completa de una sola ubicación: se puede repartir entre varias (ej: 1 manzana de B1 + 1 de
+  // C1). Por eso cada pieza tiene una o más "fuentes" (equipoId + cantidad), y la suma de las
+  // cantidades de sus fuentes siempre debe ser igual a la cantidad total necesaria de esa pieza.
   let ubicAcopleResolver=null;
-  let ubicAcopleOpciones=[]; // [{idx, requiereEleccion, opciones:[{id,localizacion,disponible}], elegido}]
+  let ubicAcopleOpciones=[]; // [{idx, nombre, cantidadTotal, opcionesDisponibles:[{id,localizacion,disponible}], fuentes:[{equipoId,cantidad}]}]
 
-  // Resuelve, para cada parte de la receta (partesDef), la lista de filas de catálogo
-  // compatibles (misma pieza, cualquier ubicación). Devuelve una promesa que resuelve con un
-  // array paralelo a partesDef de equipoId elegidos, o null si el usuario cancela.
+  // Resuelve, para cada parte de la receta (partesDef), de dónde sacar sus unidades. Devuelve
+  // una promesa que resuelve con un array paralelo a partesDef de fuentes ([{equipoId,cantidad}]
+  // por pieza, ya repartida), o null si el usuario cancela.
   function elegirUbicacionesAcople(partesDef){
     const opciones=partesDef.map((pz,idx)=>{
       const compatibles=piezasCompatiblesAcople(pz,undefined)
         .map(e=>({id:e.id,localizacion:e.localizacion||'Sin ubicación',disponible:e.disponible||0}))
         .sort((a,b)=>b.disponible-a.disponible);
-      return {idx,nombre:pz.nombre,requiereEleccion:compatibles.length>1,opciones:compatibles,elegido:compatibles[0]?.id||pz.equipoId};
+      const cantidadTotal=pz.cantidad||1;
+      const primerId=compatibles[0]?.id||pz.equipoId;
+      return {idx,nombre:pz.nombre,cantidadTotal,opcionesDisponibles:compatibles,fuentes:[{equipoId:primerId,cantidad:cantidadTotal}]};
     });
 
-    const necesitaModal=opciones.some(o=>o.requiereEleccion);
+    const necesitaModal=opciones.some(o=>o.opcionesDisponibles.length>1);
     if(!necesitaModal){
-      return Promise.resolve(opciones.map(o=>o.elegido));
+      return Promise.resolve(opciones.map(o=>o.fuentes));
     }
 
     ubicAcopleOpciones=opciones;
-    const cont=document.getElementById('ubicAcopleContenido');
-    if(cont){
-      cont.innerHTML=opciones.map(o=>{
-        if(!o.requiereEleccion){
-          return `<div class="config-item"><span class="config-item-label">${o.nombre}</span><span style="font-size:12px;color:#888;">${o.opciones[0]?.localizacion||'Sin stock registrado'}</span></div>`;
-        }
-        return `<div style="margin-top:10px;">
-          <label style="font-size:13px;font-weight:600;">${o.nombre}</label>
-          <select style="width:100%;margin-top:4px;padding:8px;border-radius:8px;border:1px solid #ddd;" onchange="onCambioUbicacionAcople(${o.idx},this.value)">
-            ${o.opciones.map(op=>`<option value="${op.id}" ${op.id===o.elegido?'selected':''}>${op.localizacion} · ${op.disponible} disp</option>`).join('')}
-          </select>
-        </div>`;
-      }).join('');
-    }
+    renderUbicAcopleContenido();
     document.getElementById('modalUbicacionAcople')?.classList.remove('hidden');
     return new Promise(resolve=>{ ubicAcopleResolver=resolve; });
   }
 
-  window.onCambioUbicacionAcople=function(idx,equipoId){
+  function renderUbicAcopleContenido(){
+    const cont=document.getElementById('ubicAcopleContenido');
+    if(!cont) return;
+    cont.innerHTML=ubicAcopleOpciones.map(o=>{
+      if(o.opcionesDisponibles.length<=1){
+        return `<div class="config-item"><span class="config-item-label">${o.nombre}</span><span style="font-size:12px;color:#888;">${o.opcionesDisponibles[0]?.localizacion||'Sin stock registrado'}</span></div>`;
+      }
+      const suma=o.fuentes.reduce((s,f)=>s+(f.cantidad||0),0);
+      const sumaOk=suma===o.cantidadTotal;
+      return `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #eee;">
+        <label style="font-size:13px;font-weight:600;">${o.nombre} <span style="font-weight:400;color:#888;">— necesita ${o.cantidadTotal} en total</span></label>
+        <div style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">
+          ${o.fuentes.map((f,fIdx)=>`
+            <div style="display:flex;gap:6px;align-items:center;">
+              <select style="flex:1;padding:8px;border-radius:8px;border:1px solid #ddd;" onchange="onCambioFuenteAcople(${o.idx},${fIdx},'equipoId',this.value)">
+                ${o.opcionesDisponibles.map(op=>`<option value="${op.id}" ${op.id===f.equipoId?'selected':''}>${op.localizacion} · ${op.disponible} disp</option>`).join('')}
+              </select>
+              <input type="number" min="1" max="${o.cantidadTotal}" value="${f.cantidad}" style="width:60px;padding:8px;border-radius:8px;border:1px solid #ddd;" onchange="onCambioFuenteAcople(${o.idx},${fIdx},'cantidad',this.value)" />
+              ${o.fuentes.length>1?`<button type="button" class="btn-sm" style="background:#fce4ec;color:#c62828;" onclick="quitarFuenteAcople(${o.idx},${fIdx})">✕</button>`:''}
+            </div>
+          `).join('')}
+        </div>
+        ${o.fuentes.length<o.opcionesDisponibles.length&&o.cantidadTotal>o.fuentes.length?`<button type="button" class="btn-sm" style="background:#ede7f6;color:#6a1b9a;margin-top:6px;" onclick="agregarFuenteAcople(${o.idx})">+ Repartir con otra ubicación</button>`:''}
+        <p style="font-size:12px;margin-top:4px;color:${sumaOk?'#888':'#c62828'};">Suma actual: ${suma} / ${o.cantidadTotal}${!sumaOk?' ⚠️ debe sumar exacto':''}</p>
+      </div>`;
+    }).join('');
+  }
+
+  window.onCambioFuenteAcople=function(idx,fIdx,campo,valor){
     const o=ubicAcopleOpciones.find(x=>x.idx===idx);
-    if(o) o.elegido=equipoId;
+    if(!o) return;
+    const f=o.fuentes[fIdx];
+    if(!f) return;
+    if(campo==='cantidad'){
+      const n=parseInt(valor)||0;
+      f.cantidad=Math.max(1,Math.min(o.cantidadTotal,n));
+    } else {
+      f.equipoId=valor;
+    }
+    renderUbicAcopleContenido();
+  }
+
+  window.agregarFuenteAcople=function(idx){
+    const o=ubicAcopleOpciones.find(x=>x.idx===idx);
+    if(!o) return;
+    const yaUsados=new Set(o.fuentes.map(f=>f.equipoId));
+    const siguienteOpcion=o.opcionesDisponibles.find(op=>!yaUsados.has(op.id))||o.opcionesDisponibles[0];
+    // Al agregar una segunda fuente, se reparte la cantidad a la mitad (redondeando) entre la
+    // primera y esta nueva, para partir de un punto razonable — el usuario ajusta desde ahí.
+    const primera=o.fuentes[0];
+    const mitad=Math.max(1,Math.floor(o.cantidadTotal/2));
+    primera.cantidad=o.cantidadTotal-mitad>0?o.cantidadTotal-mitad:primera.cantidad;
+    o.fuentes.push({equipoId:siguienteOpcion.id,cantidad:mitad});
+    renderUbicAcopleContenido();
+  }
+
+  window.quitarFuenteAcople=function(idx,fIdx){
+    const o=ubicAcopleOpciones.find(x=>x.idx===idx);
+    if(!o||o.fuentes.length<=1) return;
+    const [quitada]=o.fuentes.splice(fIdx,1);
+    // Lo que tenía la fuente quitada se lo lleva la que quede primero, para no perder cantidad.
+    if(o.fuentes[0]) o.fuentes[0].cantidad=Math.min(o.cantidadTotal,(o.fuentes[0].cantidad||0)+(quitada?.cantidad||0));
+    renderUbicAcopleContenido();
   }
 
   window.confirmarUbicacionAcople=function(){
+    const incompletas=ubicAcopleOpciones.filter(o=>o.fuentes.reduce((s,f)=>s+(f.cantidad||0),0)!==o.cantidadTotal);
+    if(incompletas.length>0){
+      toast(`La cantidad repartida de "${incompletas[0].nombre}" no suma el total necesario`,true);
+      return;
+    }
     document.getElementById('modalUbicacionAcople')?.classList.add('hidden');
-    const resultado=ubicAcopleOpciones.sort((a,b)=>a.idx-b.idx).map(o=>o.elegido);
+    const resultado=ubicAcopleOpciones.sort((a,b)=>a.idx-b.idx).map(o=>o.fuentes);
     const resolver=ubicAcopleResolver; ubicAcopleResolver=null;
     if(resolver) resolver(resultado);
   }
@@ -9062,10 +9121,17 @@
       // La receta del acople compuesto no fija una ubicación: cada pieza puede existir en
       // más de una (ej: rejilla 1060 en B1 y en C1). Si alguna pieza tiene más de una ubicación
       // con stock registrado, se le pregunta al usuario de cuál tomarla para este pedido —
-      // nunca se elige automáticamente.
-      const equipoIdsElegidos=await elegirUbicacionesAcople(partesDefBase);
-      if(equipoIdsElegidos===null) return; // el usuario canceló la elección de ubicación
-      const partesDef=partesDefBase.map((pz,idx)=>({...pz,equipoId:equipoIdsElegidos[idx]||pz.equipoId}));
+      // nunca se elige automáticamente. Además, la cantidad de una pieza (ej: 2 "manzanas" por
+      // acople) se puede repartir entre varias ubicaciones en vez de sacarla toda de una sola.
+      const fuentesElegidas=await elegirUbicacionesAcople(partesDefBase);
+      if(fuentesElegidas===null) return; // el usuario canceló la elección de ubicación
+      // Cada pieza de la receta se "desdobla" en una fila por cada ubicación de la que se
+      // decidió sacarla — cada fila queda con su propia cantidad (parte del total de esa
+      // pieza) y su propio equipoId, tal como si fueran piezas distintas de ahí en adelante.
+      const partesDef=partesDefBase.flatMap((pz,idx)=>
+        (fuentesElegidas[idx]&&fuentesElegidas[idx].length>0?fuentesElegidas[idx]:[{equipoId:pz.equipoId,cantidad:pz.cantidad}])
+          .map(f=>({...pz,equipoId:f.equipoId,cantidad:f.cantidad}))
+      );
 
       // Aviso preventivo: si al reservar esto quedan menos acoples completos armables que el
       // mínimo configurado para este acople, se avisa y se deja decidir si continuar o no.
