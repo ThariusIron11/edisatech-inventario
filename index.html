@@ -1138,6 +1138,18 @@
   // de enableNetwork() puede fallar. Sin reintento, Firestore se quedaba "apagado" en silencio
   // hasta que el usuario hacía F5 — este es justo el caso reportado: celular, pestaña del
   // navegador, 5-30 min en segundo plano.
+  //
+  // BUG que esto corrige: disableNetwork()/enableNetwork() pueden resolver SIN lanzar error
+  // aunque el canal real no haya quedado bien reconectado del todo (pasa bajo ciertas
+  // condiciones de red — no es un error de JS, es que el reconecte de fondo simplemente no
+  // terminó de cuajar). Antes, si no hubo excepción, se daba el ciclo por exitoso y no se
+  // volvía a intentar NUNCA MÁS hasta el próximo evento (heartbeat cada 3 min, cambiar de
+  // pestaña, etc.) — por eso a veces quedaba "pegado" mostrando el aviso de sin conexión hasta
+  // que alguien hacía F5. Ahora, después de reconectar, se verifica el estado REAL en vez de
+  // asumir éxito: si listenersDesdeCache (el mismo contador que ya usa el aviso de arriba)
+  // sigue teniendo listeners sirviendo desde caché unos segundos después, se reintenta de
+  // nuevo — hasta que de verdad se confirme la reconexión, no solo hasta que la llamada no
+  // truene.
   async function reconectarFirestore(intentos){
     intentos=intentos||0;
     const ahora=Date.now();
@@ -1149,14 +1161,21 @@
     try{
       await disableNetwork(db);
       await enableNetwork(db);
-      reconectando=false;
     }catch(e){
       if(intentos<4){
         setTimeout(()=>reconectarFirestore(intentos+1), 2000*(intentos+1));
+        return;
+      }
+      // Se acabaron los reintentos por error explícito — igual seguimos abajo verificando si
+      // de verdad quedó conectado, por si el intento silencioso sí sirvió.
+    }
+    setTimeout(()=>{
+      if(listenersDesdeCache.size>0 && intentos<8){
+        reconectarFirestore(intentos+1);
       } else {
         reconectando=false;
       }
-    }
+    },4000);
   }
   let pestanaEstuvoOculta=false;
   document.addEventListener('visibilitychange', () => {
